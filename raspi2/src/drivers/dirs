@@ -25,6 +25,7 @@ THE SAMPLE SOURCE CODE IS PROVIDED "AS IS", WITH NO WARRANTIES OR INDEMNITIES.
 #
 DIRS= \
     raspibasic_ddi \
+    dwchci \
 
 
 #    TestDrv \

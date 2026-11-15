@@ -73,17 +73,22 @@ ENDIF BSP_NODISPLAY !
     "Suspend"=dword:0
 
 
-; USB - DesignWare USB Host controller driver
-;Use the key below to auto load the USB Host driver on boot
-;[HKEY_LOCAL_MACHINE\Drivers\Builtin\DWCUsbHost]
-;Replace the key name above to allow the USB Host driver to be loaded by an app after boot for debugging
-[HKEY_LOCAL_MACHINE\Drivers\DWCUsbHost]
+; USB - DesignWare OTG (DWC2) USB host controller driver (src\drivers\dwchci)
+; Loaded at boot. Set BSP_NOUSB=1 to leave it out.
+; DmaBusOffset is added to a physical address to get the bus address the
+; controller uses for DMA (assumed 0x40000000 on the BCM2835, not verified).
+; The IClass values are added once the driver creates a real HCD object.
+; @CESYSGEN IF CE_MODULES_USBD
+IF BSP_NOUSB !
+[HKEY_LOCAL_MACHINE\Drivers\BuiltIn\DWCUsbHost]
    "Prefix"="HCD"
    "Dll"="dwchci.dll"
+   "Order"=dword:30
    "HcdCapability"=dword:4      ;HCD_SUSPEND_ON_REQUEST
    "HcdPipeCache"=dword:8
-   "EnSoftRetry"=dword:0
-   "IClass"=multi_sz:"{7D96B50A-6BB5-4f64-ACD2-A0C3A45375FA}","{A32942B7-920C-486b-B0E6-92A702A99B35}" 
+   "DmaBusOffset"=dword:40000000
+ENDIF BSP_NOUSB !
+; @CESYSGEN ENDIF CE_MODULES_USBD
 
 ; Placeholder for Network driver
 [HKEY_LOCAL_MACHINE\Drivers\USB\LoadClients\1060_60416\Default\Default\STDMICROETHCTLR]
@@ -109,8 +114,3 @@ ENDIF BSP_NODISPLAY !
 ; USB - default class driver for debugging
 [HKEY_LOCAL_MACHINE\Drivers\USB\LoadClients\Default\Default\Default\GenUSB]
    "DLL"="GenUSB.DLL"
-
-; Simple USB driver
-[HKEY_LOCAL_MACHINE\Drivers\SimpleUSB]
-   "Prefix"="HCD"
-   "Dll"="simpusb.dll"

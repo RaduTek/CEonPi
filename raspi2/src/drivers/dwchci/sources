@@ -1,0 +1,20 @@
+# DesignWare OTG (DWC2) USB host controller driver for the BCM2835.
+# Links the CE USB 2.0 host library (hcd2lib), which needs SYSGEN_USB.
+
+TARGETNAME=dwchci
+TARGETTYPE=DYNLINK
+DLLENTRY=_DllMainCRTStartup
+
+INCLUDES=$(INCLUDES);$(_PUBLICROOT)\common\oak\drivers\usb\hcd\usb20\usb2com
+
+SOURCES= \
+    system.cpp \
+    dwccore.cpp \
+    stubs.cpp
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib
+
+SOURCELIBS= \
+    $(_COMMONOAKROOT)\lib\$(_CPUINDPATH)\hcd2lib.lib
