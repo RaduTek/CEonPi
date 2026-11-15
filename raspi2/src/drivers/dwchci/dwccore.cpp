@@ -368,6 +368,13 @@ void CDwcCore::AckPortChanges(DWORD dwHprt)
 // root port. The port enables itself after the reset if a device answers.
 void CDwcCore::PortReset(DWORD dwMilliseconds)
 {
+    PortResetBegin();
+    Sleep(dwMilliseconds);
+    PortResetEnd();
+}
+
+void CDwcCore::PortResetBegin(void)
+{
     DWORD dwHprt;
 
     Wr(PCGCTL, 0);
@@ -375,11 +382,29 @@ void CDwcCore::PortReset(DWORD dwMilliseconds)
     dwHprt = Rd(HPRT0) & ~HPRT0_W1C_MASK;
     dwHprt &= ~HPRT0_SUSP;
     Wr(HPRT0, dwHprt | HPRT0_PWR | HPRT0_RST);
+}
 
-    Sleep(dwMilliseconds);
+void CDwcCore::PortResetEnd(void)
+{
+    DWORD dwHprt = Rd(HPRT0) & ~HPRT0_W1C_MASK;
 
-    dwHprt = Rd(HPRT0) & ~HPRT0_W1C_MASK;
     Wr(HPRT0, dwHprt & ~HPRT0_RST);
+}
+
+// Writing 1 to the enable bit disables the port
+void CDwcCore::PortDisable(void)
+{
+    DWORD dwHprt = Rd(HPRT0) & ~HPRT0_W1C_MASK;
+
+    Wr(HPRT0, dwHprt | HPRT0_ENA);
+}
+
+void CDwcCore::PortPower(void)
+{
+    DWORD dwHprt = Rd(HPRT0) & ~HPRT0_W1C_MASK;
+
+    if (!(dwHprt & HPRT0_PWR))
+        Wr(HPRT0, dwHprt | HPRT0_PWR);
 }
 
 // Called when the port has become enabled. The frame interval depends on
@@ -398,4 +423,110 @@ void CDwcCore::PortEnabled(DWORD dwHprt)
     dwHfir &= ~HFIR_FRINT_MASK;
     dwHfir |= dwFrInt;
     Wr(HFIR, dwHfir);
+}
+
+//-----------------------------------------------------------------------
+// Milestone 3: host channels (buffer DMA mode, no split transactions).
+// Follows Linux dwc2_hc_init and dwc2_hc_start_transfer.
+//
+
+// Program a channel and enable it. In DMA mode the core runs the whole
+// attempt by itself and raises "channel halted" when it stops, whatever
+// the reason. The reason is in the other HCINT bits.
+void CDwcCore::ChannelStart(DWORD dwCh, const DWC_CHANNEL_SETUP *pSetup)
+{
+    DWORD dwChar;
+
+    // Clear old events, enable only halted and bus error
+    Wr(HCINT(dwCh), HCINT_ALL);
+    Wr(HCINTMSK(dwCh), HCINT_CHHLTD | HCINT_AHBERR);
+    Wr(HAINTMSK, Rd(HAINTMSK) | DWC_BIT(dwCh));
+
+    dwChar = (pSetup->dwMaxPacket & HCCHAR_MPS_MASK)
+           | ((pSetup->dwEpNum & 0xF) << HCCHAR_EPNUM_SHIFT)
+           | ((pSetup->dwEpType & 0x3) << HCCHAR_EPTYPE_SHIFT)
+           | (1UL << HCCHAR_MULTICNT_SHIFT)
+           | ((pSetup->dwDevAddr & 0x7F) << HCCHAR_DEVADDR_SHIFT);
+    if (pSetup->fIn)
+        dwChar |= HCCHAR_EPDIR_IN;
+    if (pSetup->fLowSpeed)
+        dwChar |= HCCHAR_LSPDDEV;
+    if (pSetup->fOddFrame)
+        dwChar |= HCCHAR_ODDFRM;
+
+    Wr(HCCHAR(dwCh), dwChar);
+    Wr(HCSPLT(dwCh), 0);
+    Wr(HCTSIZ(dwCh), (pSetup->dwBytes & HCTSIZ_XFERSIZE_MASK)
+                   | ((pSetup->dwPackets << HCTSIZ_PKTCNT_SHIFT) & HCTSIZ_PKTCNT_MASK)
+                   | ((pSetup->dwPid << HCTSIZ_PID_SHIFT) & HCTSIZ_PID_MASK));
+    Wr(HCDMA(dwCh), pSetup->dwDmaAddr);
+
+    // Enable last
+    Wr(HCCHAR(dwCh), dwChar | HCCHAR_CHENA);
+}
+
+// Ask the core to stop a running channel. The core answers with a
+// "channel halted" interrupt. Returns FALSE if the channel is not enabled,
+// in which case no interrupt will come.
+BOOL CDwcCore::ChannelRequestHalt(DWORD dwCh)
+{
+    DWORD dwChar = Rd(HCCHAR(dwCh));
+
+    if (!(dwChar & HCCHAR_CHENA))
+        return FALSE;
+
+    Wr(HCINTMSK(dwCh), HCINT_CHHLTD);
+    Wr(HCCHAR(dwCh), dwChar | HCCHAR_CHENA | HCCHAR_CHDIS);
+    return TRUE;
+}
+
+void CDwcCore::ChannelRelease(DWORD dwCh)
+{
+    Wr(HAINTMSK, Rd(HAINTMSK) & ~DWC_BIT(dwCh));
+    Wr(HCINTMSK(dwCh), 0);
+    Wr(HCINT(dwCh), HCINT_ALL);
+}
+
+// Last resort when a halt request is not answered (port disabled)
+void CDwcCore::ChannelForceOff(DWORD dwCh)
+{
+    DWORD dwChar = Rd(HCCHAR(dwCh));
+
+    if (dwChar & HCCHAR_CHENA)
+    {
+        dwChar &= ~HCCHAR_CHENA;
+        dwChar |= HCCHAR_CHDIS;
+        Wr(HCCHAR(dwCh), dwChar);
+    }
+    ChannelRelease(dwCh);
+}
+
+DWORD CDwcCore::ChannelReadAndClearInt(DWORD dwCh)
+{
+    DWORD dwInt = Rd(HCINT(dwCh));
+
+    Wr(HCINT(dwCh), dwInt);
+    return dwInt;
+}
+
+// The device is gone and the port is disabled, so running channels will
+// never halt by themselves. Disable them without waiting (as Linux does in
+// its disconnect path) and drop whatever is left in the FIFOs.
+void CDwcCore::DisableAllChannels(void)
+{
+    DWORD i, dwChar;
+
+    for (i = 0; i < m_dwChannels; i++)
+    {
+        dwChar = Rd(HCCHAR(i));
+        if (dwChar & HCCHAR_CHENA)
+        {
+            dwChar &= ~HCCHAR_CHENA;
+            dwChar |= HCCHAR_CHDIS;
+            Wr(HCCHAR(i), dwChar);
+        }
+        ChannelRelease(i);
+    }
+    FlushTxFifos();
+    FlushRxFifo();
 }

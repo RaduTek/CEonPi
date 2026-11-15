@@ -84,8 +84,6 @@ IF BSP_NOUSB !
    "Prefix"="HCD"
    "Dll"="dwchci.dll"
    "Order"=dword:30
-   "HcdCapability"=dword:4      ;HCD_SUSPEND_ON_REQUEST
-   "HcdPipeCache"=dword:8
    "DmaBusOffset"=dword:40000000
 ENDIF BSP_NOUSB !
 ; @CESYSGEN ENDIF CE_MODULES_USBD

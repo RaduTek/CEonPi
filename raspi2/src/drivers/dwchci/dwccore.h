@@ -20,6 +20,27 @@
 #define DWC_NPTX_FIFO_WORDS     256
 #define DWC_PTX_FIFO_WORDS      512
 
+// Limits for one transfer attempt on a channel (values Linux uses for
+// the BCM2835; the hardware fields are 19 and 10 bits wide).
+#define DWC_MAX_XFER_BYTES      65535
+#define DWC_MAX_XFER_PACKETS    511
+
+// Everything needed to start one transfer attempt on a channel
+typedef struct _DWC_CHANNEL_SETUP
+{
+    DWORD dwDevAddr;        // USB device address
+    DWORD dwEpNum;          // endpoint number 0..15
+    BOOL  fIn;              // direction of this attempt
+    BOOL  fLowSpeed;        // low speed device
+    DWORD dwEpType;         // 0 control, 1 isochronous, 2 bulk, 3 interrupt
+    DWORD dwMaxPacket;      // endpoint max packet size
+    DWORD dwPid;            // HCTSIZ_PID_xxx of the first packet
+    DWORD dwBytes;          // transfer size programmed into the channel
+    DWORD dwPackets;        // packet count programmed into the channel
+    DWORD dwDmaAddr;        // bus address of the buffer
+    BOOL  fOddFrame;        // periodic endpoints: send in an odd (micro)frame
+} DWC_CHANNEL_SETUP;
+
 class CDwcCore
 {
 public:
@@ -46,10 +67,34 @@ public:
     // Root port
     DWORD ReadPort(void) const      { return Rd(HPRT0); }
     void  AckPortChanges(DWORD dwHprt);     // clear the change bits set in dwHprt
+    void  PortResetBegin(void);             // start driving reset
+    void  PortResetEnd(void);               // release reset
     void  PortReset(DWORD dwMilliseconds);  // drive reset, blocks for the duration
+    void  PortDisable(void);                // disable the port (device stays connected)
+    void  PortPower(void);                  // make sure the port is powered
     void  PortEnabled(DWORD dwHprt);        // program the frame interval for the speed
 
     DWORD Channels(void) const      { return m_dwChannels; }
+
+    // Host channels. One channel carries one transfer attempt at a time.
+    void  ChannelStart(DWORD dwCh, const DWC_CHANNEL_SETUP *pSetup);
+    BOOL  ChannelRequestHalt(DWORD dwCh);   // FALSE: channel is not running
+    void  ChannelRelease(DWORD dwCh);       // mask the channel's interrupts
+    void  ChannelForceOff(DWORD dwCh);      // disable without waiting for the halt
+    DWORD ChannelReadAndClearInt(DWORD dwCh);
+    DWORD ChannelBytesLeft(DWORD dwCh) const
+    {
+        return Rd(HCTSIZ(dwCh)) & HCTSIZ_XFERSIZE_MASK;
+    }
+    DWORD ChannelPacketsLeft(DWORD dwCh) const
+    {
+        return (Rd(HCTSIZ(dwCh)) & HCTSIZ_PKTCNT_MASK) >> HCTSIZ_PKTCNT_SHIFT;
+    }
+    DWORD ChannelNextPid(DWORD dwCh) const
+    {
+        return (Rd(HCTSIZ(dwCh)) & HCTSIZ_PID_MASK) >> HCTSIZ_PID_SHIFT;
+    }
+    void  DisableAllChannels(void);         // after a disconnect
 
     DWORD Rd(DWORD dwOffset) const
     {

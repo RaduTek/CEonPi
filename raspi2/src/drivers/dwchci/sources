@@ -10,7 +10,8 @@ INCLUDES=$(INCLUDES);$(_PUBLICROOT)\common\oak\drivers\usb\hcd\usb20\usb2com
 SOURCES= \
     system.cpp \
     dwccore.cpp \
-    stubs.cpp
+    cdwchcd.cpp \
+    cpipe.cpp
 
 TARGETLIBS= \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \
