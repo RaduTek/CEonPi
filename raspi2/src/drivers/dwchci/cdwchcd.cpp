@@ -620,6 +620,7 @@ void CDwcHcd::HandlePort(void)
 void CDwcHcd::HandleDisconnect(DWC_TRANSFER **ppDone)
 {
     CDwcPipe *pPipe;
+    DWORD dwStuck;
     int i;
 
     // The core also raises this around a port reset while the device is
@@ -630,11 +631,29 @@ void CDwcHcd::HandleDisconnect(DWC_TRANSFER **ppDone)
     DWCMSG((TEXT("DWCHCI: device disconnected\r\n")));
 
     // Nothing will complete any more: stop the channels and fail everything
-    m_core.DisableAllChannels();
+    dwStuck = m_core.DisableAllChannels();
     for (i = 0; i < DWC_MAX_CHANNELS; i++)
         m_apChannelOwner[i] = NULL;
     for (pPipe = m_pPipeList; pPipe != NULL; pPipe = pPipe->m_pNextPipe)
         pPipe->OnDisconnect(ppDone);
+
+    // Some devices (notably composite wireless receivers that poll several
+    // interrupt-IN endpoints) leave channels that will not halt once the
+    // device is gone: the core cannot drain the periodic request queue, so
+    // CHENA never clears and the whole host wedges - the next device will not
+    // enumerate and the port will not even re-enable. Flushing the FIFOs does
+    // not clear a stuck CHENA; only a core reset does. It is cheap, mirrors
+    // the cold-boot bring-up, and leaves the port powered, so a device that is
+    // still attached is re-detected and enumerates normally.
+    if (dwStuck > 0)
+    {
+        DWCMSG((TEXT("DWCHCI: %d channel(s) would not halt; resetting the controller\r\n"), dwStuck));
+        if (m_core.HostInit())
+            m_core.EnableInterrupts();
+        else
+            DWCMSG((TEXT("DWCHCI: ***ERROR*** controller re-init after disconnect failed\r\n")));
+        m_dwSofWaiters = 0;     // nothing is polling after the reset
+    }
 
     m_dwPortChange |= DWC_PC_CONNECT;
     SetEvent(m_hPortEvent);

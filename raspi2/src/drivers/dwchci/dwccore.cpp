@@ -527,7 +527,7 @@ DWORD CDwcCore::ChannelReadAndClearInt(DWORD dwCh)
 // enumeration when several interrupt-IN channels are active at once (as on a
 // composite device such as a wireless keyboard/mouse receiver), which then
 // shows up as a device that will not re-enumerate.
-void CDwcCore::DisableAllChannels(void)
+DWORD CDwcCore::DisableAllChannels(void)
 {
     DWORD i, dwChar, dwActive = 0, dwStuck = 0;
 
@@ -555,4 +555,6 @@ void CDwcCore::DisableAllChannels(void)
     if (dwActive != 0)
         DWCMSG((TEXT("DWCHCI: disconnect halted %d active channel(s), %d stuck\r\n"),
                 dwActive, dwStuck));
+
+    return dwStuck;
 }

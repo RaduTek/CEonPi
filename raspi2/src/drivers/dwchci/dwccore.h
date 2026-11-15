@@ -108,7 +108,7 @@ public:
     {
         return (Rd(HCTSIZ(dwCh)) & HCTSIZ_PID_MASK) >> HCTSIZ_PID_SHIFT;
     }
-    void  DisableAllChannels(void);         // after a disconnect
+    DWORD DisableAllChannels(void);         // after a disconnect; returns channels that would not halt
 
     DWORD Rd(DWORD dwOffset) const
     {
