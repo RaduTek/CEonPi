@@ -42,7 +42,7 @@ These instructions assume you have a basic knowledge of building Windows Embedde
 
 To use this BSP, you will need to have an installed copy of Platform Builder 7. You can download an evaluation copy of Platform Builder 7 from the Microsoft Web Site at: http://www.microsoft.com/windowsembedded/en-us/downloads.aspx
 
-Scroll down to "Windows Embedded Compact 7.  Expand that link and then click on "Register to get the product key and download the Windows Embedded Compact 7 evaluation". You’ll need to provide some basic information but after that you’ll be able to download Platform Builder 7 and get a registration key.
+Scroll down to "Windows Embedded Compact 7".  Expand that link and then click on "Register to get the product key and download the Windows Embedded Compact 7 evaluation". You’ll need to provide some basic information but after that you’ll be able to download Platform Builder 7 and get a registration key.
 
 Platform Builder 7 installs into Visual Studio 2008.  If you don’t have a copy of VS’08, you can download an evaluation copy at the same Windows Embedded website.
 
@@ -50,7 +50,7 @@ Install VS ’08, VS’08 SP1 and then Platform Builder 7.
 
 ### Downloading the BSP and project files
 
-Select the Download page of the Codeplex project.  Download the BSP in the .zip file `RASPI2BSP.zip`.  Unzip the file into the `\wince700\platform directory`. The BSP is now installed under the folder name \wince700\platform\raspi2
+Select the Download page of the Codeplex project.  Download the BSP in the .zip file `RASPI2BSP.zip`.  Unzip the file into the `\wince700\platform directory`. The BSP is now installed under the folder name `\wince700\platform\raspi2`.
 
 You can also download a preconfigured project RaspiCE in the file `RaspiCEProject.zip`.  Unzip that file into `\wince700\OSDesigns`.  The Project is now installed in `\wince700\OSDesigns\RaspiCE`.
 
@@ -90,7 +90,8 @@ The card does need a minimal number of files used by the Pi during the boot proc
 
 
 The `bootcode.bin` and `start.elf` files can be found on the Raspberry Pi website.
- 
+
+**Updated note (2026)**: The latest files from the official firmware repository (https://github.com/raspberrypi/firmware/tree/master/boot) work just fine.
 
 A safer way to create the bootable image is to follow the directions on the Raspberry Pi website to create one of the many Linux images for the Pi.  I suggest you try to boot that version of Linux on your system to confirm that the SD card is formatted correctly.
 
@@ -113,7 +114,7 @@ Also note that the BSP has only been tested with video through the HDMI connecto
 
 to the config.txt file in the root directory of the SD card.
 
-KITL Support
+### KITL Support
 
 The BSP includes support for KITL over serial using the Raspberry Pi’s UART1 accessed through the GPIO lines on the expansion connector P1.  The GPIO pins are 3.3 volt and cannot be directly connected to a standard RS-232 UART without damaging the Pi. Instead use a FTDI board that provides a 3.3 volt UART on one side and a USB connection on the other. 
 
@@ -135,6 +136,12 @@ https://www.sparkfun.com/products/9873
 All images are built by default with KITL enabled. To build without kitl disable through the Project | Properties dialog box or if at the command line set the environment variable `IMGNOKITL=1`.
 
 By default, any image that has KITL enabled will output some initial diagnostic information to the video screen on boot.  To prevent this, disable KITL (`IMGNOKITL=1`) and rebuild the BSP.
+
+**Update**: Newer Raspberry Pi firmware sets the UART at a higher frequency (48 MHz) than before, so UART won't work by default, and you'll see `UART_readData Error! 5xx` on screen. To fix this, add this line to `config.txt`:
+
+    init_uart_clock=3000000
+
+to set the UART clock to 3 MHz.
 
 ### Disabling KITL
 
