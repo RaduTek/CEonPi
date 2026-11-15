@@ -1,0 +1,26 @@
+* text=auto
+# Build-system and source files: LF in the repo, CRLF in the working tree
+dirs         text eol=crlf
+sources      text eol=crlf
+makefile     text eol=crlf
+*.cmn        text eol=crlf
+*.c          text eol=crlf
+*.cpp        text eol=crlf
+*.h          text eol=crlf
+*.s          text eol=crlf
+*.inc        text eol=crlf
+*.def        text eol=crlf
+*.bib        text eol=crlf
+*.reg        text eol=crlf
+*.dat        text eol=crlf
+*.bat        text eol=crlf
+*.sln        text eol=crlf
+*.pbxml      text eol=crlf
+*.pbcxml     text eol=crlf
+*.html       text eol=crlf
+platform.db  text eol=crlf
+OSDesign.db  text eol=crlf
+# Binary files: never touch
+*.bmp        binary
+*.suo        binary
+Thumbs.db    binary

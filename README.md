@@ -75,7 +75,8 @@ Of course, it’s possible to enable the debugger in Retail builds and to disabl
 You will need to perform a complete build on each of the 3 configurations you want to use. The easy way to do this is to go to the Build | Batch Build menu item and select all 3 to be built sequentially. This takes some time but frees you to do other tasks instead of watching for each individual build to complete.
 
 The result of a build will be a kernel.img file in the Release Directory for each of the build types. This is simply a renamed nk.nb0 file. Take care that your image size does not exceed the size of NKLEN in `wince700\platform\raspi2\files\config.bib`.  This setting defines the length of a "ROM" that the romimage tool uses to layout the .nb0 file. If the image is too big, part of the image will be placed in nk.nb1 and the image will fail to boot. I have put a check in the build to detect this condition. If the image is too large the MAKEIMG tool will indicate an error. Look at the end of the makeimg.log file in the release directory for the explanation of the error.
-Creating a bootable SD image
+
+### Creating a bootable SD image
 
 Windows Embedded CE doesn’t need the additional Linux partition that is standard on a bootable SD card.  Instead, a simple FAT formatted SD card will do. 
 
