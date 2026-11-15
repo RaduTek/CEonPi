@@ -1,0 +1,180 @@
+# USB host driver for CEonPi: plan and status
+
+Last updated: 2026-11-15, after writing milestone 3 (not yet tested).
+
+Goal: a keyboard or mouse working on the CE desktop when plugged directly into the Pi Zero's
+OTG port (no hub). Hubs, split transactions and USB Ethernet come later.
+
+## Status at a glance
+
+| Milestone | State |
+|---|---|
+| M0 OS design has USB host + HID | Done (Debug configuration sysgen'd, modules in image) |
+| M1 Skeleton DLL, register dump | Done, verified on a Pi Zero |
+| M2 Core bring-up, root port detect | Done, verified on a Pi Zero (FS, LS, HS devices) |
+| M3 hcd2lib integration, control pipes, enumeration | **Written, not built or tested** |
+| M4 Interrupt and bulk pipes (HID works) | Not started |
+| M5 Clean-up | Not started |
+
+Git state when this was written: M1 is committed (`1f37a66 USB host driver skeleton`). M2 and
+M3 are uncommitted changes in the working tree. `CLAUDE.md`, `USB_PLAN.md` and `bootlog.txt`
+are untracked.
+
+## Next step: test M3
+
+1. Build `src\drivers\dwchci` in the **Debug** configuration, run makeimg, copy `kernel.img`.
+2. Boot, plug in a keyboard, wait about ten seconds, unplug. Repeat with a USB stick.
+3. Save the Output window to `C:\Dev\ceonpi\bootlog.txt`.
+
+Expected log:
+- At load: `DWCHCI: DeviceInitialize, SysIntr=17 DmaBusOffset=0x40000000`, the register dump,
+  `host init done`, `DeviceInitialize done (milestone 3: ...)`, `HcdPdd_Init done`.
+- On plug-in: `device descriptor (first 8 bytes) from addr 0: 12 01 ...`, then
+  `device descriptor from addr 1: USB ... VID xxxx PID xxxx` with the device's real IDs, then
+  `interrupt pipe (addr 1 ep 0x81) requested: not implemented yet` (keyboard) or the bulk
+  equivalent (stick). That last line is the expected stopping point for M3.
+- On unplug: `device disconnected`.
+
+If it fails:
+- `AHB (DMA) error` or an all-zero descriptor: wrong DMA bus address. Set `DmaBusOffset` in
+  `files\platform.reg` to `0` or `C0000000`, makeimg, retest.
+- `transfer failed, addr 0 ep 0x00 stage 0`: the SETUP packet does not get through.
+- Link errors (unresolved externals from `hcd2lib`): read `Z:\platform\raspi2\Build.log`.
+- This code has never been compiled, so expect compile errors first.
+
+## How we work
+
+- Claude edits `C:\Dev\ceonpi` and cannot build. The VM's `C:\WINCE700` is visible read-only
+  as `Z:\` (`Z:\platform\raspi2` is the VM's copy of the BSP, `Z:\projects\RaspiCE\RaspiCE`
+  the OS design, `Z:\platform\raspi2\Build.log` the last BSP build log).
+- The user builds, boots and saves the KITL output to `C:\Dev\ceonpi\bootlog.txt`.
+- Use the **Debug** configuration. Release has `IMGNOKITL=1`, so no debug output.
+- KITL serial output costs about 30 ms per line. Log events and errors, never per attempt.
+- New source files need CRLF: write them, run `unix2dos`, check `git ls-files --eol`.
+  `.hpp` is not covered by `.gitattributes`, so use `.h`.
+- Reference sources on the host: `C:\Dev\csud` (MIT) and
+  `C:\Dev\linux-dwc2\drivers\usb\dwc2` (host files GPL-2.0+ OR BSD-3-Clause). Linux is the
+  behavioural model; CSUD is wrong for a device directly on the root port.
+
+## Design
+
+`dwchci.dll` links the CE USB 2.0 host library `hcd2lib`
+(`Z:\public\common\oak\drivers\usb\hcd\usb20\usb2com`). The library provides the `HCD_*`
+stream entry points, the USBD interface, the root hub and hub logic, enumeration and
+`CPhysMem`. We provide a `CHcd` subclass, the pipe factories and the `HcdPdd_*` functions.
+The CE EHCI driver (`...\usb20\ehci`, `...\usb20\ehcipdd`) is the template for conventions.
+
+Files in `raspi2\src\drivers\dwchci`:
+
+| File | Content |
+|---|---|
+| `dwc2reg.h` | Register offsets and masks (from Linux `hw.h`). No bitfield structs. |
+| `dwccore.cpp/.h` | `CDwcCore`: mapping, register dump, core reset, host init, port control, channel primitives. No CE USB stack dependency. |
+| `cdwchcd.cpp/.h` | `CDwcHcd : CHcd`: root hub virtuals, interrupt thread, channel table, pipe list, `CreateHCDObject`. |
+| `cpipe.cpp/.h` | `CDwcPipe : CPipeAbs`: transfer queue, control transfer state machine, abort, completion, the four `Create*Pipe` factories. |
+| `system.cpp` | PDD: creates the `CPhysMem` pool (320 KB, allocated by the library) and the HCD object. |
+| `sources`, `makefile`, `dwchci.def` | Build files. |
+
+Also touched: `src\drivers\dirs`, `files\platform.bib` (`dwchci.dll`, `NK SHK`),
+`files\platform.reg` (`Drivers\BuiltIn\DWCUsbHost`, values `Prefix`, `Dll`, `Order`,
+`DmaBusOffset`).
+
+Key design decisions:
+- One lock (`CDwcHcd::LockHc`) protects the channel table, pipe list, all transfer queues and
+  channel registers. Client callbacks and client buffers are touched only in
+  `CDwcPipe::Complete`, which runs without the lock.
+- One transfer per pipe is active at a time, on one channel, one attempt at a time. The
+  channel is released after every attempt.
+- Buffer DMA mode. `HCINTMSK` = channel halted + AHB error; the reason for a halt is decoded
+  from the other `HCINT` bits (order: transfer complete, stall, babble, NAK, then errors with
+  three retries).
+- All client data is copied through `CPhysMem` (uncached, contiguous, 32-byte aligned), so
+  there are no cache or alignment issues. A client-supplied physical address is ignored.
+  IN buffers are rounded up to a whole packet.
+- Bus address = physical address + `DmaBusOffset` (registry, default `0x40000000`).
+- Port change bits are kept in software (`m_dwPortChange`); the library clears them through
+  `RootHubFeature`. The interrupt thread acknowledges the hardware bits.
+- `HCD_SUSPEND_ON_REQUEST` is not accepted and no `IClass` is registered, so there is no
+  power management yet.
+
+## Facts verified on hardware (Pi Zero)
+
+- `MmMapIoSpace(0x20980000, 0x1000)` works from a kernel-mode driver.
+- `GSNPSID=0x4F54280A` (core 2.80a: reset completes when `CSFTRST` self-clears; no `HFIR`
+  reload control).
+- `GHWCFG2=0x228DDD50`: internal DMA, UTMI+ HS PHY, dedicated FS PHY, 8 channels, dynamic FIFO.
+- `GHWCFG3=0x0FF000E8`: FIFO depth 4080 words. `GHWCFG4=0x1FF00020`: 8-bit UTMI (60 MHz PHY
+  clock), no descriptor DMA.
+- Firmware leaves: `GUSBCFG=0x20402700` (force-host set), host mode, `HCFG=1`, `HFIR=48000`,
+  `HPRT0=0`, FIFO sizes RX 4096 / NP TX 256 / periodic TX 512.
+- After our init: `GUSBCFG=0x20001400`, `GAHBCFG=0x30` (+ bit 0 when interrupts are on),
+  `HCFG=0`, FIFOs RX 774 / NP 256 at 774 / periodic 512 at 1030, `HPRT0=0x1000`.
+- Interrupt path works: `SYSINTR_USBHOST` = 17, handled by the existing OAL code.
+- Speed detection works for FS, LS and HS. `HFIR` = 59999 (FS/LS) or 7499 (HS).
+- Quirks: `DISCONNINT` fires around a port reset while the device is still connected, and
+  `CONNDET` can re-latch from contact bounce. Check `HPRT0.CONNSTS` before acting.
+
+## Facts about hcd2lib that shaped the code
+
+- `HcdMdd_CreateHcdObject` must be called inside `HcdPdd_Init`. It calls `CreateHCDObject`
+  then `DeviceInitialize`, and allocates the pipe cache from `m_dwOpenedPipeCacheSize`.
+- The hub thread calls `ResetAndEnablePort` twice per attach (once itself, once in
+  `AttachDevice`), reads the speed from `GetPortStatus` after the reset, and clears each
+  reported change bit with `RootHubFeature(CLEAR, bit | 0x10)`.
+- The control pipe is created with address 0 and max packet 8. The device address is passed
+  with every `IssueTransfer`. `ChangeMaxPacketSize` is called after the first descriptor.
+- Because the root hub is declared high speed, the library calls `AddedTt(0, port)` for a
+  full/low speed device on the root port and passes hub address 0 to the pipe. Rule used:
+  hub address 0 means no split; a non-high-speed device with a non-zero hub address needs
+  split transactions and `OpenPipe` refuses it.
+- Completion convention (from EHCI `CQTransfer::DoneTransfer`): copy IN data, set
+  `*lpfComplete`, `*lpdwError`, `*lpdwBytesTransferred`, then call the callback, all in
+  `__try`. Abort reports `USB_CANCELED_ERROR` and then calls the cancel callback.
+- A control stall must not set the pipe's halted flag: after a failed transfer the library
+  calls `IsPipeHalted` and gives up on the device if it is set.
+
+## Unverified assumptions
+
+1. DMA bus address offset `0x40000000` (M3 tests it).
+2. In buffer DMA mode the core retries NAKs on control and bulk endpoints by itself without
+   halting the channel (taken from Linux behaviour). If control transfers to a slow device
+   hang or spin, look here.
+3. `HCTSIZ` after a halt gives bytes left (IN) and packets left (OUT), and its PID field is
+   the next data toggle (as Linux uses them).
+
+## M4 plan: interrupt and bulk pipes
+
+Add to `CDwcPipe` (the machinery is shared; only the data stage is used):
+- `CreateBulkPipe` and `CreateInterruptPipe` return a `CDwcPipe`. Initial PID is `m_dwNextPid`
+  (DATA0 after open and after `ClearHaltedFlag`); set `pTransfer->dwPid = m_dwNextPid` when a
+  non-control transfer starts, and save the toggle from `HCTSIZ` on completion (already done).
+- Interrupt endpoints: one packet per attempt. Set `fOddFrame` in `DWC_CHANNEL_SETUP` from the
+  parity of the frame the transfer will go out in (`HFNUM` + 1), as Linux
+  `dwc2_hc_set_even_odd_frame` does.
+- Interrupt NAK: the channel halts with NAK. Keep the transfer at the head of the queue and
+  retry `bInterval` frames later (frames for FS/LS, 2^(bInterval-1) microframes for HS). Do
+  not restart immediately as control pipes do.
+- Scheduling: unmask `GINTSTS_SOF` only while some interrupt pipe is waiting for its slot; in
+  the SOF handler start the pipes whose due frame has arrived; mask SOF again when none wait.
+  Frame arithmetic wraps at `0x3FFF`. This costs up to 1000 interrupts per second while a
+  keyboard is idle; a timer-based wake-up is the later optimisation.
+- Frame overrun on an interrupt endpoint: retry at the next interval without counting it as
+  an error.
+- Stall on bulk or interrupt: set the halted flag and reset the toggle (already in place).
+- Keep `HCINTMSK` as is.
+
+Expected result: typing in a CE window and moving the mouse work; unplug and replug works;
+the boot stays responsive.
+
+## M5 and later
+
+- M5: move logging behind debug zones, remove the register dump from every boot, update
+  `CLAUDE.md`, consider registering the power-management `IClass`.
+- Later: hubs with split transactions (`AddedTt`, `HCSPLT`, start-split / complete-split
+  sequencing as in Linux), isochronous pipes, USB Ethernet.
+
+## Open side issues
+
+- The boot log shows `OEMInterruptEnable: ERROR enabling unknown SysIntr=11` just before GWES
+  loads. It predates the USB driver's use of interrupts; source not found.
+- `src\INC\dwcRegs.h` (the original author's bitfield header) is unused and unverified.
