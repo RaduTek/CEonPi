@@ -46,6 +46,7 @@ CDwcHcd::CDwcHcd(IN LPVOID pvPddObject, IN CPhysMem *pCPhysMem,
     m_fInReset = FALSE;
     m_fDisableRequested = FALSE;
     m_pPipeList = NULL;
+    m_dwSofWaiters = 0;
     for (i = 0; i < DWC_MAX_CHANNELS; i++)
         m_apChannelOwner[i] = NULL;
 
@@ -195,7 +196,7 @@ BOOL CDwcHcd::DeviceInitialize(void)
     // A device that is already plugged in raises the port interrupt now
     m_core.EnableInterrupts();
 
-    DWCMSG((TEXT("DWCHCI: DeviceInitialize done (milestone 3: USB stack attached, control pipes)\r\n")));
+    DWCMSG((TEXT("DWCHCI: DeviceInitialize done (milestone 4: control, bulk and interrupt pipes)\r\n")));
     return TRUE;
 }
 
@@ -558,6 +559,20 @@ void CDwcHcd::RemovePipe(CDwcPipe *pPipe)
     }
 }
 
+// Interrupt scheduler: turn the start-of-frame interrupt on for the first
+// waiting pipe and off again when the last one stops waiting. Lock held.
+void CDwcHcd::SofWaiterAdd(void)
+{
+    if (m_dwSofWaiters++ == 0)
+        m_core.EnableSof();
+}
+
+void CDwcHcd::SofWaiterRemove(void)
+{
+    if (m_dwSofWaiters > 0 && --m_dwSofWaiters == 0)
+        m_core.DisableSof();
+}
+
 //-----------------------------------------------------------------------
 // Interrupt handling
 //
@@ -651,6 +666,17 @@ void CDwcHcd::HandleChannels(DWC_TRANSFER **ppDone)
     }
 }
 
+// Start of frame. Give every interrupt pipe a chance to start the poll
+// whose scheduled frame has arrived. Lock held. Pipes that start a poll
+// only program a channel, so nothing completes here.
+void CDwcHcd::HandleSof(void)
+{
+    CDwcPipe *pPipe;
+
+    for (pPipe = m_pPipeList; pPipe != NULL; pPipe = pPipe->m_pNextPipe)
+        pPipe->OnSofFrame();
+}
+
 DWORD WINAPI CDwcHcd::IstStub(LPVOID lpv)
 {
     return ((CDwcHcd *)lpv)->Ist();
@@ -683,10 +709,16 @@ DWORD CDwcHcd::Ist(void)
             HandleDisconnect(&pDone);
         }
 
+        if (dwPend & GINTSTS_SOF)
+        {
+            m_core.Wr(GINTSTS, GINTSTS_SOF);    // acknowledge this frame
+            HandleSof();
+        }
+
         if (dwPend & GINTSTS_HCHINT)
             HandleChannels(&pDone);
 
-        dwOther = dwPend & ~(GINTSTS_PRTINT | GINTSTS_DISCONNINT | GINTSTS_HCHINT);
+        dwOther = dwPend & ~(GINTSTS_PRTINT | GINTSTS_DISCONNINT | GINTSTS_SOF | GINTSTS_HCHINT);
         if (dwOther)
         {
             DWCMSG((TEXT("DWCHCI: unexpected interrupt bits 0x%08x\r\n"), dwOther));

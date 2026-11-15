@@ -29,16 +29,44 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     , m_fHighSpeed(fIsHighSpeed)
     , m_bHubAddress(bHubAddress)
     , m_bHubPort(bHubPort)
+    , m_bInterval(lpEndpointDescriptor->bInterval)
 {
+    DWORD dwInterval;
+
     UNREFERENCED_PARAMETER(bDeviceAddress);
 
     m_pNextPipe = NULL;
     m_wMaxPacket = (USHORT)(lpEndpointDescriptor->wMaxPacketSize & 0x7FF);
     if (m_wMaxPacket == 0)
         m_wMaxPacket = 8;
+
+    // Poll interval for an interrupt endpoint, in HFNUM units: frames for
+    // full/low speed, 2^(bInterval-1) microframes for high speed (USB 2.0
+    // 9.6.6). Capped to half the frame-counter range so the wrap-safe
+    // "frame reached" test stays unambiguous.
+    if (m_fHighSpeed)
+    {
+        DWORD b = m_bInterval;
+        if (b < 1)  b = 1;
+        if (b > 16) b = 16;
+        dwInterval = (1UL << (b - 1));
+    }
+    else
+    {
+        dwInterval = m_bInterval;
+        if (dwInterval < 1)
+            dwInterval = 1;
+    }
+    if (dwInterval > (HFNUM_MAX_FRNUM + 1) / 2)
+        dwInterval = (HFNUM_MAX_FRNUM + 1) / 2;
+    m_dwInterval = dwInterval;
+
     m_fOpen = FALSE;
     m_fHalted = FALSE;
+    m_fLoggedData = FALSE;
     m_fWaitingChannel = FALSE;
+    m_fWaitingFrame = FALSE;
+    m_dwNextFrame = 0;
     m_iChannel = -1;
     m_dwNextPid = HCTSIZ_PID_DATA0;
     m_pHead = NULL;
@@ -355,6 +383,15 @@ void CDwcPipe::StartAttempt(void)
         break;
 
     case DWC_STAGE_DATA:
+        // A bulk or interrupt endpoint keeps a running data toggle in the
+        // pipe. Seed this transfer from it once, then let it advance with
+        // each completed packet. Control data always starts at DATA1 and is
+        // seeded in OnChannelInterrupt after the SETUP stage.
+        if (m_bEpType != USB_ENDPOINT_TYPE_CONTROL && !pTransfer->fDataPidInit)
+        {
+            pTransfer->dwPid = m_dwNextPid;
+            pTransfer->fDataPidInit = TRUE;
+        }
         dwRemaining = pTransfer->dwBufferSize - pTransfer->cbDone;
         s.fIn = fDataIn;
         s.dwPid = pTransfer->dwPid;
@@ -363,6 +400,9 @@ void CDwcPipe::StartAttempt(void)
             s.dwPackets = 1;            // zero length packet
         if (s.dwPackets > dwMaxPackets)
             s.dwPackets = dwMaxPackets;
+        // An interrupt endpoint moves at most one packet per interval
+        if (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT && s.dwPackets > 1)
+            s.dwPackets = 1;
         if (fDataIn)
         {
             // The core wants a whole number of packets for IN
@@ -375,6 +415,10 @@ void CDwcPipe::StartAttempt(void)
                 s.dwBytes = s.dwPackets * dwMps;
         }
         s.dwDmaAddr = m_pHcd->BusAddress(pTransfer->paData + pTransfer->cbDone);
+        // Periodic transfer: tell the core which (micro)frame parity it goes
+        // out in, as Linux dwc2_hc_set_even_odd_frame does.
+        if (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT)
+            s.fOddFrame = ((m_pHcd->Core()->CurFrame() + 1) & 1) ? TRUE : FALSE;
         break;
 
     case DWC_STAGE_STATUS:
@@ -412,6 +456,49 @@ void CDwcPipe::ReleaseChannel(void)
 void CDwcPipe::Kick(void)
 {
     if (m_fWaitingChannel && m_pHead != NULL && m_iChannel < 0)
+        StartAttempt();
+}
+
+// Interrupt endpoint: the head transfer is not ready (NAK) or missed its
+// slot (frame overrun). Hold it and poll again one interval later. The
+// controller arms the start-of-frame interrupt while any pipe is waiting.
+// Lock held.
+void CDwcPipe::ScheduleNextInterval(void)
+{
+    DWORD dwCur = m_pHcd->Core()->CurFrame();
+
+    m_dwNextFrame = (dwCur + m_dwInterval) & HFNUM_MAX_FRNUM;
+    if (!m_fWaitingFrame)
+    {
+        m_fWaitingFrame = TRUE;
+        m_pHcd->SofWaiterAdd();
+    }
+}
+
+// Drop a pending frame wait and release the controller's SOF reference.
+// Lock held.
+void CDwcPipe::ClearFrameWait(void)
+{
+    if (m_fWaitingFrame)
+    {
+        m_fWaitingFrame = FALSE;
+        m_pHcd->SofWaiterRemove();
+    }
+}
+
+// Start-of-frame reached. If this pipe's scheduled frame has arrived, start
+// the poll. Lock held.
+void CDwcPipe::OnSofFrame(void)
+{
+    if (!m_fWaitingFrame)
+        return;
+    if (!m_pHcd->Core()->FrameReached(m_dwNextFrame))
+        return;
+
+    m_fWaitingFrame = FALSE;
+    m_pHcd->SofWaiterRemove();
+
+    if (m_pHead != NULL && m_iChannel < 0)
         StartAttempt();
 }
 
@@ -550,6 +637,16 @@ void CDwcPipe::OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone)
             else
             {
                 m_dwNextPid = dwNextPid;
+                // One line the first time data flows on a bulk or interrupt
+                // pipe, so the log shows the endpoint came alive without a
+                // message per report.
+                if (!m_fLoggedData)
+                {
+                    m_fLoggedData = TRUE;
+                    DWCMSG((TEXT("DWCHCI: %s pipe ep 0x%02x alive: first packet %d bytes\r\n"),
+                            (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT) ? TEXT("interrupt") : TEXT("bulk"),
+                            m_bEndpointAddress, pTransfer->cbDone));
+                }
                 Finish(pTransfer, USB_NO_ERROR, ppDone);
             }
             break;
@@ -605,9 +702,23 @@ void CDwcPipe::OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone)
         }
     }
 
-    if (dwHcint & HCINT_NAK)
+    // An interrupt endpoint that is merely not ready (NAK) or that missed
+    // its frame (frame overrun) is retried one interval later, not at once,
+    // and the miss is not counted as an error. Genuine transaction or toggle
+    // errors fall through to the retry-with-count path below.
+    if (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT &&
+        (dwHcint & (HCINT_NAK | HCINT_FRMOVRUN)) &&
+        !(dwHcint & (HCINT_XACTERR | HCINT_DATATGLERR)))
     {
-        // The device is busy, not broken. Try again.
+        pTransfer->dwErrCount = 0;
+        ScheduleNextInterval();
+        return;
+    }
+
+    if ((dwHcint & HCINT_NAK) && m_bEpType != USB_ENDPOINT_TYPE_INTERRUPT)
+    {
+        // Control or bulk: the device is busy, not broken. Try again at once.
+        // (An interrupt NAK was handled above by the interval scheduler.)
         pTransfer->dwErrCount = 0;
         StartAttempt();
         return;
@@ -637,6 +748,7 @@ void CDwcPipe::OnDisconnect(DWC_TRANSFER **ppDone)
 
     m_iChannel = -1;
     m_fWaitingChannel = FALSE;
+    ClearFrameWait();
 
     while ((pTransfer = m_pHead) != NULL)
     {
@@ -708,6 +820,7 @@ void CDwcPipe::AbortOne(DWC_TRANSFER *pTransfer, LPTRANSFER_NOTIFY_ROUTINE lpCan
     if (fWasHead)
     {
         m_fWaitingChannel = FALSE;
+        ClearFrameWait();           // it may have been waiting for its frame
         m_pHead = pTransfer->pNext;
     }
     else if (pPrev != NULL)
@@ -843,15 +956,9 @@ CPipeAbs * CreateBulkPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescript
                IN const UCHAR bHubAddress, IN const UCHAR bHubPort, const PVOID ttContext,
                IN CHcd * const pChcd)
 {
-    UNREFERENCED_PARAMETER(fIsLowSpeed);
-    UNREFERENCED_PARAMETER(fIsHighSpeed);
-    UNREFERENCED_PARAMETER(bHubAddress);
-    UNREFERENCED_PARAMETER(bHubPort);
     UNREFERENCED_PARAMETER(ttContext);
-    UNREFERENCED_PARAMETER(pChcd);
-    DWCMSG((TEXT("DWCHCI: bulk pipe (addr %d ep 0x%02x) requested: not implemented yet\r\n"),
-            bDeviceAddress, lpEndpointDescriptor->bEndpointAddress));
-    return NULL;
+    return new CDwcPipe(lpEndpointDescriptor, fIsLowSpeed, fIsHighSpeed, bDeviceAddress,
+                        bHubAddress, bHubPort, (CDwcHcd *)pChcd);
 }
 
 CPipeAbs * CreateInterruptPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
@@ -860,15 +967,9 @@ CPipeAbs * CreateInterruptPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDes
                IN const UCHAR bHubAddress, IN const UCHAR bHubPort, const PVOID ttContext,
                IN CHcd * const pChcd)
 {
-    UNREFERENCED_PARAMETER(fIsLowSpeed);
-    UNREFERENCED_PARAMETER(fIsHighSpeed);
-    UNREFERENCED_PARAMETER(bHubAddress);
-    UNREFERENCED_PARAMETER(bHubPort);
     UNREFERENCED_PARAMETER(ttContext);
-    UNREFERENCED_PARAMETER(pChcd);
-    DWCMSG((TEXT("DWCHCI: interrupt pipe (addr %d ep 0x%02x) requested: not implemented yet\r\n"),
-            bDeviceAddress, lpEndpointDescriptor->bEndpointAddress));
-    return NULL;
+    return new CDwcPipe(lpEndpointDescriptor, fIsLowSpeed, fIsHighSpeed, bDeviceAddress,
+                        bHubAddress, bHubPort, (CDwcHcd *)pChcd);
 }
 
 CPipeAbs * CreateIsochronousPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,

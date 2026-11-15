@@ -1,6 +1,7 @@
 # USB host driver for CEonPi: plan and status
 
-Last updated: 2026-11-15, after writing milestone 3 (not yet tested).
+Last updated: 2026-11-15, after writing milestone 4 (not yet built or tested).
+Milestone 3 is verified on hardware (a mouse and a keyboard enumerated; see the log facts below).
 
 Goal: a keyboard or mouse working on the CE desktop when plugged directly into the Pi Zero's
 OTG port (no hub). Hubs, split transactions and USB Ethernet come later.
@@ -12,33 +13,44 @@ OTG port (no hub). Hubs, split transactions and USB Ethernet come later.
 | M0 OS design has USB host + HID | Done (Debug configuration sysgen'd, modules in image) |
 | M1 Skeleton DLL, register dump | Done, verified on a Pi Zero |
 | M2 Core bring-up, root port detect | Done, verified on a Pi Zero (FS, LS, HS devices) |
-| M3 hcd2lib integration, control pipes, enumeration | **Written, not built or tested** |
-| M4 Interrupt and bulk pipes (HID works) | Not started |
+| M3 hcd2lib integration, control pipes, enumeration | Done, verified on a Pi Zero (mouse 045e:00cb, keyboard 17ef:60ba enumerated) |
+| M4 Interrupt and bulk pipes (HID works) | **Written, not built or tested** |
 | M5 Clean-up | Not started |
 
-Git state when this was written: M1 is committed (`1f37a66 USB host driver skeleton`). M2 and
-M3 are uncommitted changes in the working tree. `CLAUDE.md`, `USB_PLAN.md` and `bootlog.txt`
-are untracked.
+Git state when this was written: M1, M2 and M3 are committed (`43669a4 Milestone 3: attach HCD
+to CE USB stack`, `42c4a39 Add agent documentation`). M4 is uncommitted changes in the working
+tree, touching only `src\drivers\dwchci` (`dwccore.h`, `cpipe.h/.cpp`, `cdwchcd.h/.cpp`).
+`bootlog.txt` is untracked.
 
-## Next step: test M3
+## Next step: test M4
 
 1. Build `src\drivers\dwchci` in the **Debug** configuration, run makeimg, copy `kernel.img`.
-2. Boot, plug in a keyboard, wait about ten seconds, unplug. Repeat with a USB stick.
+2. Boot, plug in a USB keyboard, type into a CE window. Plug in a USB mouse, move it and watch
+   the pointer. Unplug and replug each. Leave a device idle for a while to confirm the boot
+   stays responsive (the interrupt scheduler polls on every SOF while a HID device is attached).
 3. Save the Output window to `C:\Dev\ceonpi\bootlog.txt`.
 
 Expected log:
-- At load: `DWCHCI: DeviceInitialize, SysIntr=17 DmaBusOffset=0x40000000`, the register dump,
-  `host init done`, `DeviceInitialize done (milestone 3: ...)`, `HcdPdd_Init done`.
-- On plug-in: `device descriptor (first 8 bytes) from addr 0: 12 01 ...`, then
-  `device descriptor from addr 1: USB ... VID xxxx PID xxxx` with the device's real IDs, then
-  `interrupt pipe (addr 1 ep 0x81) requested: not implemented yet` (keyboard) or the bulk
-  equivalent (stick). That last line is the expected stopping point for M3.
+- At load: the register dump as before, now ending `DeviceInitialize done (milestone 4: control,
+  bulk and interrupt pipes)`, `HcdPdd_Init done`.
+- On plug-in: the same enumeration lines as M3 (`device descriptor ... VID xxxx PID xxxx`). The
+  M3 "interrupt pipe ... not implemented yet" line is gone.
+- The first time a report arrives on each HID endpoint: one line
+  `DWCHCI: interrupt pipe ep 0x81 alive: first packet N bytes` (logged once per pipe, not per
+  report). After that, typing and mouse movement should work in the CE UI with no further log
+  spam.
 - On unplug: `device disconnected`.
 
+Expected behaviour: keystrokes reach CE windows; the mouse moves the pointer; unplug/replug
+re-enumerates and HID works again; the system stays responsive while a HID device is idle.
+
 If it fails:
-- `AHB (DMA) error` or an all-zero descriptor: wrong DMA bus address. Set `DmaBusOffset` in
-  `files\platform.reg` to `0` or `C0000000`, makeimg, retest.
-- `transfer failed, addr 0 ep 0x00 stage 0`: the SETUP packet does not get through.
+- No `... alive: first packet` line and HID does nothing: the interrupt poll is not completing.
+  Look for `transfer failed, addr N ep 0x81 ...` (transaction errors) in the log.
+- The boot hangs or crawls while a HID device is attached: the SOF scheduler is mis-firing.
+  Suspect the frame arithmetic (`CurFrame`/`FrameReached` in `dwccore.h`) or a leaked SOF
+  waiter (the `m_dwSofWaiters` count in `cdwchcd.cpp` never returning to 0).
+- `AHB (DMA) error`: wrong DMA bus address (but M3 already validated `DmaBusOffset=0x40000000`).
 - Link errors (unresolved externals from `hcd2lib`): read `Z:\platform\raspi2\Build.log`.
 - This code has never been compiled, so expect compile errors first.
 
@@ -135,14 +147,32 @@ Key design decisions:
 
 ## Unverified assumptions
 
-1. DMA bus address offset `0x40000000` (M3 tests it).
+1. DMA bus address offset `0x40000000`: **verified by M3** (descriptors read correctly, no AHB
+   errors).
 2. In buffer DMA mode the core retries NAKs on control and bulk endpoints by itself without
    halting the channel (taken from Linux behaviour). If control transfers to a slow device
    hang or spin, look here.
 3. `HCTSIZ` after a halt gives bytes left (IN) and packets left (OUT), and its PID field is
    the next data toggle (as Linux uses them).
 
-## M4 plan: interrupt and bulk pipes
+## M4 plan: interrupt and bulk pipes (implemented, awaiting test)
+
+Implemented as described below. Summary of what landed in the code:
+- `CreateBulkPipe` / `CreateInterruptPipe` now construct a `CDwcPipe` (the constructor already
+  handles any endpoint type via `m_bEpType`).
+- Bulk reuses the control data-stage machinery. A per-pipe running toggle `m_dwNextPid` is
+  seeded into each transfer once (`DWC_TRANSFER.fDataPidInit`) and advanced from `HCTSIZ` on
+  completion; NAK retries immediately; STALL sets the halted flag and resets the toggle.
+- Interrupt pipes add a start-of-frame scheduler: on NAK or frame overrun the head transfer is
+  held and re-polled one interval later (`ScheduleNextInterval`); the controller enables the SOF
+  interrupt only while `m_dwSofWaiters > 0` (`CDwcHcd::SofWaiterAdd/Remove`,
+  `CDwcCore::EnableSof/DisableSof`). The SOF handler (`CDwcHcd::HandleSof` ->
+  `CDwcPipe::OnSofFrame`) starts pipes whose due frame has arrived, using the wrap-safe
+  `CDwcCore::FrameReached`. One packet per attempt; `fOddFrame` set from `HFNUM + 1`.
+- Frame-wait bookkeeping is released on disconnect, abort and close (`ClearFrameWait`) so the
+  SOF waiter count cannot leak.
+
+Original design notes (for reference):
 
 Add to `CDwcPipe` (the machinery is shared; only the data stage is used):
 - `CreateBulkPipe` and `CreateInterruptPipe` return a `CDwcPipe`. Initial PID is `m_dwNextPid`

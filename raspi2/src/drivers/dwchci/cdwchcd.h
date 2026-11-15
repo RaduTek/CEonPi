@@ -73,12 +73,18 @@ public:
     void AddPipe(CDwcPipe *pPipe);
     void RemovePipe(CDwcPipe *pPipe);
 
+    // Interrupt pipes waiting for their scheduled frame. The start-of-frame
+    // interrupt is on only while at least one pipe is waiting. Lock held.
+    void SofWaiterAdd(void);
+    void SofWaiterRemove(void);
+
 private:
     static DWORD WINAPI IstStub(LPVOID lpv);
     DWORD Ist(void);
     void HandlePort(void);
     void HandleDisconnect(struct _DWC_TRANSFER **ppDone);
     void HandleChannels(struct _DWC_TRANSFER **ppDone);
+    void HandleSof(void);
     void StopIst(void);
 
     CDwcCore            m_core;
@@ -100,6 +106,7 @@ private:
 
     CDwcPipe *          m_apChannelOwner[DWC_MAX_CHANNELS];
     CDwcPipe *          m_pPipeList;
+    DWORD               m_dwSofWaiters;     // interrupt pipes waiting for a frame
 };
 
 #endif // __CDWCHCD_H__

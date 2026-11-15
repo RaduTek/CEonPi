@@ -89,15 +89,22 @@ controller so keyboards, mice and USB Ethernet work.
   Observed: the core raises `DISCONNINT` around a port reset while the device is still
   connected, and `CONNDET` can re-latch from contact bounce, so both must be checked against
   `HPRT0.CONNSTS`.
-- M3 written, not yet tested: `CDwcHcd` (root hub virtuals, IST, channel table) in
-  `cdwchcd.cpp`, control pipes in `cpipe.cpp`, PDD in `system.cpp`. Bulk, interrupt and
-  isochronous pipe creation still returns NULL. `HCD_SUSPEND_ON_REQUEST` is deliberately not
-  used (no `SuspendHC` support).
+- M3 done and verified on a Pi Zero: `CDwcHcd` (root hub virtuals, IST, channel table) in
+  `cdwchcd.cpp`, control pipes in `cpipe.cpp`, PDD in `system.cpp`. A mouse (045e:00cb) and a
+  keyboard (17ef:60ba) both enumerated (descriptor read from addr 0, re-read from addr 1, real
+  VID/PID), confirming the control-pipe path and `DmaBusOffset=0x40000000`.
+  `HCD_SUSPEND_ON_REQUEST` is deliberately not used (no `SuspendHC` support).
+- M4 written, not yet built or tested: bulk and interrupt pipes in `cpipe.cpp`
+  (`CreateBulkPipe`/`CreateInterruptPipe` now return a `CDwcPipe`). Bulk reuses the control
+  data-stage machinery with a per-pipe data toggle; interrupt pipes add a start-of-frame
+  scheduler (`SofWaiterAdd/Remove` in `cdwchcd.cpp`, `EnableSof/DisableSof` and
+  `CurFrame/FrameReached` in `dwccore.h`) that re-polls one `bInterval` apart on NAK/overrun.
+  Isochronous pipe creation still returns NULL.
 - Design facts worth keeping: hcd2lib calls `AddedTt` for a full/low speed device on the root
   hub too, because the root hub is declared high speed; pipes with hub address 0 need no split.
   The device address comes with each `IssueTransfer`, not with pipe creation. Client callbacks
   run outside the controller lock.
-- Still unverified: DMA bus address offset (`DmaBusOffset`, assumed `0x40000000`).
+- DMA bus address offset (`DmaBusOffset` = `0x40000000`) is verified by M3.
 - KITL serial output costs about 30 ms per line, so do not log per transfer attempt.
 - The boot log shows `OEMInterruptEnable: ERROR enabling unknown SysIntr=11` around the time
   GWES loads. It is not caused by the USB driver (M1 enabled no interrupt); source not yet found.

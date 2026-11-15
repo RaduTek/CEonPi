@@ -64,6 +64,20 @@ public:
     void EnableInterrupts(void);
     void DisableInterrupts(void);
 
+    // Start-of-frame interrupt. Enabled only while an interrupt pipe is
+    // waiting for its scheduled frame (see the interrupt scheduler).
+    void EnableSof(void)    { Wr(GINTMSK, Rd(GINTMSK) | GINTSTS_SOF); }
+    void DisableSof(void)   { Wr(GINTMSK, Rd(GINTMSK) & ~GINTSTS_SOF); Wr(GINTSTS, GINTSTS_SOF); }
+
+    // The host frame counter (HFNUM). At high speed it counts microframes,
+    // otherwise frames. It wraps at HFNUM_MAX_FRNUM.
+    DWORD CurFrame(void) const { return Rd(HFNUM) & HFNUM_MAX_FRNUM; }
+    // TRUE once the counter has reached dwFrame (wrap-safe over half the range)
+    BOOL  FrameReached(DWORD dwFrame) const
+    {
+        return (((CurFrame() - dwFrame) & HFNUM_MAX_FRNUM) < ((HFNUM_MAX_FRNUM + 1) / 2)) ? TRUE : FALSE;
+    }
+
     // Root port
     DWORD ReadPort(void) const      { return Rd(HPRT0); }
     void  AckPortChanges(DWORD dwHprt);     // clear the change bits set in dwHprt

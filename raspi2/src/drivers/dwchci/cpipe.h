@@ -5,7 +5,9 @@
 // keeps a FIFO queue of transfers and runs the transfer at the head of the
 // queue on one host channel, one attempt at a time.
 //
-// Milestone 3 implements control pipes only.
+// Milestone 3 implemented control pipes. Milestone 4 adds bulk and
+// interrupt pipes: bulk reuses the data-stage machinery, interrupt adds a
+// start-of-frame scheduler so each poll happens one interval apart.
 //
 #ifndef __CPIPE_H__
 #define __CPIPE_H__
@@ -56,6 +58,7 @@ typedef struct _DWC_TRANSFER
     DWORD   dwStage;
     DWORD   cbDone;             // data bytes transferred so far
     DWORD   dwPid;              // PID of the next data packet
+    BOOL    fDataPidInit;       // dwPid seeded from the pipe toggle (non-control)
     DWORD   dwErrCount;
     DWORD   dwUsbError;         // result
     BOOL    fAborting;          // AbortTransfer is waiting for the channel
@@ -110,6 +113,7 @@ public:
     // are appended to *ppDone and completed later without the lock.
     void OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone);
     void OnDisconnect(DWC_TRANSFER **ppDone);
+    void OnSofFrame(void);      // interrupt pipes: start a due poll
     void Kick(void);
     BOOL IsWaitingForChannel(void) const { return m_fWaitingChannel; }
 
@@ -121,6 +125,8 @@ public:
 
 private:
     void StartAttempt(void);
+    void ScheduleNextInterval(void);    // interrupt pipes: wait one interval
+    void ClearFrameWait(void);          // drop a pending frame wait
     void ReleaseChannel(void);
     void Finish(DWC_TRANSFER *pTransfer, DWORD dwUsbError, DWC_TRANSFER **ppDone);
     static void AppendDone(DWC_TRANSFER *pTransfer, DWORD dwUsbError, DWC_TRANSFER **ppDone);
@@ -135,11 +141,16 @@ private:
     const BOOL      m_fHighSpeed;
     const UCHAR     m_bHubAddress;
     const UCHAR     m_bHubPort;
+    const UCHAR     m_bInterval;        // endpoint bInterval (interrupt pipes)
     USHORT          m_wMaxPacket;
+    DWORD           m_dwInterval;       // poll interval in HFNUM units
 
     BOOL            m_fOpen;
     BOOL            m_fHalted;
+    BOOL            m_fLoggedData;      // first data packet logged (bring-up aid)
     BOOL            m_fWaitingChannel;  // head transfer waits for a free channel
+    BOOL            m_fWaitingFrame;    // head transfer waits for its due frame
+    DWORD           m_dwNextFrame;      // HFNUM value to start the next poll at
     int             m_iChannel;         // channel in use, or -1
     DWORD           m_dwNextPid;        // data toggle of bulk/interrupt endpoints
     HANDLE          m_hAbortEvent;
