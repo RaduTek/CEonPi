@@ -1,0 +1,23 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual Studio 2008
+Project("{901F95BB-0EF7-4A93-94B5-A8655FA8CA96}") = "RaspiCE", "RaspiCE\RaspiCE.pbxml", "{F083F792-C39E-48C6-A450-E70EF97208AD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		raspi2 ARMV6 Checked|Platform Builder (_TGTCPU) = raspi2 ARMV6 Checked|Platform Builder (_TGTCPU)
+		raspi2 ARMV6 Debug|Platform Builder (_TGTCPU) = raspi2 ARMV6 Debug|Platform Builder (_TGTCPU)
+		raspi2 ARMV6 Release|Platform Builder (_TGTCPU) = raspi2 ARMV6 Release|Platform Builder (_TGTCPU)
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F083F792-C39E-48C6-A450-E70EF97208AD}.raspi2 ARMV6 Checked|Platform Builder (_TGTCPU).ActiveCfg = raspi2 ARMV6 Checked|Platform Builder (_TGTCPU)
+		{F083F792-C39E-48C6-A450-E70EF97208AD}.raspi2 ARMV6 Checked|Platform Builder (_TGTCPU).Build.0 = raspi2 ARMV6 Checked|Platform Builder (_TGTCPU)
+		{F083F792-C39E-48C6-A450-E70EF97208AD}.raspi2 ARMV6 Debug|Platform Builder (_TGTCPU).ActiveCfg = raspi2 ARMV6 Debug|Platform Builder (_TGTCPU)
+		{F083F792-C39E-48C6-A450-E70EF97208AD}.raspi2 ARMV6 Debug|Platform Builder (_TGTCPU).Build.0 = raspi2 ARMV6 Debug|Platform Builder (_TGTCPU)
+		{F083F792-C39E-48C6-A450-E70EF97208AD}.raspi2 ARMV6 Release|Platform Builder (_TGTCPU).ActiveCfg = raspi2 ARMV6 Release|Platform Builder (_TGTCPU)
+		{F083F792-C39E-48C6-A450-E70EF97208AD}.raspi2 ARMV6 Release|Platform Builder (_TGTCPU).Build.0 = raspi2 ARMV6 Release|Platform Builder (_TGTCPU)
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
