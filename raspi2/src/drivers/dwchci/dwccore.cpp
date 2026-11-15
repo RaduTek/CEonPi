@@ -12,6 +12,11 @@
 
 #define DWCMSG(x)   RETAILMSG(1, x)
 
+// Bounded wait for a channel to clear CHENA after a halt request. On a live
+// bus a halt takes microseconds; the cap only guards a channel that refuses
+// to halt (e.g. the bus is already gone) so it cannot stall the caller.
+#define DWC_CH_HALT_MS          20
+
 CDwcCore::CDwcCore()
 {
     m_pRegs = NULL;
@@ -510,23 +515,44 @@ DWORD CDwcCore::ChannelReadAndClearInt(DWORD dwCh)
 }
 
 // The device is gone and the port is disabled, so running channels will
-// never halt by themselves. Disable them without waiting (as Linux does in
-// its disconnect path) and drop whatever is left in the FIFOs.
+// never finish by themselves. Halt each one, then drop whatever is left in
+// the FIFOs.
+//
+// The halt must be done the same way as HaltAllChannels(): the core only
+// acts on CHDIS when CHENA is written with it, and an IN channel must first
+// be turned around to OUT (EPDIR = 0) or the core keeps waiting for the
+// in-flight IN token, which never completes once the device has gone. A
+// plain "clear CHENA, set CHDIS" leaves a busy IN channel wedged. That is
+// harmless for a single idle HID device but corrupts the FIFOs for the next
+// enumeration when several interrupt-IN channels are active at once (as on a
+// composite device such as a wireless keyboard/mouse receiver), which then
+// shows up as a device that will not re-enumerate.
 void CDwcCore::DisableAllChannels(void)
 {
-    DWORD i, dwChar;
+    DWORD i, dwChar, dwActive = 0, dwStuck = 0;
 
     for (i = 0; i < m_dwChannels; i++)
     {
         dwChar = Rd(HCCHAR(i));
         if (dwChar & HCCHAR_CHENA)
         {
-            dwChar &= ~HCCHAR_CHENA;
-            dwChar |= HCCHAR_CHDIS;
+            dwActive++;
+            dwChar &= ~HCCHAR_EPDIR_IN;
+            dwChar |= HCCHAR_CHENA | HCCHAR_CHDIS;
             Wr(HCCHAR(i), dwChar);
+            // The channel halts almost at once on a dead bus; bound the wait
+            // so a channel that will not halt cannot stall the disconnect.
+            if (!WaitBits(HCCHAR(i), HCCHAR_CHENA, 0, DWC_CH_HALT_MS))
+                dwStuck++;
         }
         ChannelRelease(i);
     }
     FlushTxFifos();
     FlushRxFifo();
+
+    // One line on disconnect (rare), so the log shows how many channels were
+    // still busy and whether any refused to halt.
+    if (dwActive != 0)
+        DWCMSG((TEXT("DWCHCI: disconnect halted %d active channel(s), %d stuck\r\n"),
+                dwActive, dwStuck));
 }
