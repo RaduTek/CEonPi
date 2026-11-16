@@ -83,6 +83,15 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     m_dwNextPid = HCTSIZ_PID_DATA0;
     m_pHead = NULL;
     m_hAbortEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    // One-shot diagnostic: show exactly what hcd2lib hands us at pipe creation,
+    // so we can see why a full/low speed device behind an external hub is (or is
+    // not) flagged for split transactions. One line per pipe, at enumeration
+    // only -- not per transfer.
+    DWCMSG((TEXT("DWCHCI: new pipe ep 0x%02x type %d addr %d ls %d hs %d hub %d port %d tt %d -> split %d\r\n"),
+            m_bEndpointAddress, m_bEpType, bDeviceAddress,
+            fIsLowSpeed, fIsHighSpeed, bHubAddress, bHubPort,
+            (ttContext != NULL) ? 1 : 0, m_fDoSplit ? 1 : 0));
 }
 
 CDwcPipe::~CDwcPipe()
