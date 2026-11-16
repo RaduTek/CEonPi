@@ -23,19 +23,22 @@ Verified split traps: `m_fDoSplit` must be `!fIsHighSpeed && bHubAddress != 0`, 
 enumeration); and for split transactions HCCHAR `MULTICNT` is the retry count (3 for
 interrupt/isoc, 1 for control/bulk, per dwc2).
 
-Open issues (two independent, both involving low-speed mice):
-- **Interrupt over-polling (fix implemented, test pending):** after a report completed the client
-  re-issued and the pipe polled again at once, so a continuously-moving mouse was polled far faster
-  than its `bInterval` and flooded the HID queue (`Queue is full. Dropping packet`, seen with a
-  Microsoft low-speed mouse behind a HS hub). `IssueTransfer` now holds a fresh interrupt poll to
-  the interval boundary (`m_dwLastPollFrame`).
-- **Low-speed device behind a full-speed hub (unresolved, niche):** a LS mouse plugged into a
-  full-speed hub (e.g. a Dell keyboard-hub, 413c:1003, that makes the root bus run at FS) fails to
-  enumerate - the LS SETUP babbles and the core disables the root port (`root port disabled by
-  core, HPRT0=0x...1409`, no overcurrent), looping. Confirmed NOT a split bug: the diagnostic shows
-  the mouse as `ls 1 ... split 0`, and a FS device behind the same hub works. This is the
-  LS-on-a-FS-bus (PRE-packet) path, never exercised; needs hardware experimentation. A HS hub, or
-  plugging the mouse straight into the Pi, both work.
+Resolved issues (both independent, both involved low-speed mice):
+- **Interrupt over-polling - FIXED, verified.** After a report completed the client re-issued and
+  the pipe polled again at once, so a continuously-moving mouse was polled far faster than its
+  `bInterval` and flooded the HID queue (`Queue is full. Dropping packet`, seen with a Microsoft
+  low-speed mouse behind a HS hub). `IssueTransfer` now holds a fresh interrupt poll to the
+  interval boundary (`m_dwLastPollFrame`). Verified on hardware (MS mouse no longer stutters/drops).
+- **Low-speed device behind a full-speed hub - RESOLVED (hardware limit), verified.** A LS mouse
+  plugged into a full-speed hub (e.g. a Dell keyboard-hub, 413c:1003, which makes the root bus run
+  at FS) cannot be reached on this silicon: the BCM2835 core (dedicated FS PHY + UTMI+ HS PHY)
+  cannot emit low-speed PRE packets while the root port runs at full speed, so the LS token babbled
+  and the core disabled the root port in a loop. dwc2 refuses this exact case (`hcd.c:1860`,
+  `-ENODEV`). `CDwcCore::LowSpeedUnreachable` now detects it and `CDwcPipe::IssueTransfer` fails the
+  transfer cleanly (`USB_DEVICE_NOT_RESPONDING_ERROR`) instead of babbling - only that one device
+  fails to enumerate, the hub and everything else stay up. Also gated `m_fDoSplit` on the root port
+  being HS (a FS/LS device behind a FS hub has no TT). A LS device behind a **HS** hub (splits), or
+  straight into the Pi, both still work.
 
 Goal: a keyboard or mouse working on the CE desktop when plugged directly into the Pi Zero's
 OTG port (no hub). Hubs, split transactions and USB Ethernet come later.
