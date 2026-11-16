@@ -1067,6 +1067,13 @@ void CDwcPipe::OnDisconnect(DWC_TRANSFER **ppDone)
     m_fWaitingChannel = FALSE;
     ClearFrameWait();
 
+    // The device is gone. Halt the pipe so the library stops retrying on it:
+    // after a failed transfer it checks IsPipeHalted and gives up on the device
+    // when set. Without this, a hub behind the unplugged one (a nested hub whose
+    // parent vanished, so nothing else tears it down) polls its status endpoint
+    // forever - every attempt fails, is retried at once, and never terminates.
+    m_fHalted = TRUE;
+
     while ((pTransfer = m_pHead) != NULL)
     {
         m_pHead = pTransfer->pNext;
