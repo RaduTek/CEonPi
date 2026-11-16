@@ -54,7 +54,8 @@ public:
     virtual DWORD SetCapability(DWORD dwCap);
     virtual DWORD GetCapability();
 
-    // CDeviceGlobal interface. No transaction translator support yet.
+    // CDeviceGlobal interface. One CDwcTt per full/low speed device behind a
+    // high speed hub carries that TT's split-transaction bandwidth bookkeeping.
     virtual PVOID AddedTt(UCHAR uHubAddress, UCHAR uPort);
     virtual BOOL DeleteTt(UCHAR uHubAddress, UCHAR uPort, PVOID ttContext);
 

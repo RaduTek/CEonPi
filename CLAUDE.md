@@ -94,12 +94,34 @@ controller so keyboards, mice and USB Ethernet work.
   keyboard (17ef:60ba) both enumerated (descriptor read from addr 0, re-read from addr 1, real
   VID/PID), confirming the control-pipe path and `DmaBusOffset=0x40000000`.
   `HCD_SUSPEND_ON_REQUEST` is deliberately not used (no `SuspendHC` support).
-- M4 written, not yet built or tested: bulk and interrupt pipes in `cpipe.cpp`
-  (`CreateBulkPipe`/`CreateInterruptPipe` now return a `CDwcPipe`). Bulk reuses the control
-  data-stage machinery with a per-pipe data toggle; interrupt pipes add a start-of-frame
-  scheduler (`SofWaiterAdd/Remove` in `cdwchcd.cpp`, `EnableSof/DisableSof` and
-  `CurFrame/FrameReached` in `dwccore.h`) that re-polls one `bInterval` apart on NAK/overrun.
-  Isochronous pipe creation still returns NULL.
+- M4 tested: bulk and interrupt pipes in `cpipe.cpp` (`CreateBulkPipe`/`CreateInterruptPipe`
+  return a `CDwcPipe`). Bulk reuses the control data-stage machinery with a per-pipe data
+  toggle; interrupt pipes add a start-of-frame scheduler (`SofWaiterAdd/Remove` in `cdwchcd.cpp`,
+  `EnableSof/DisableSof` and `CurFrame/FrameReached` in `dwccore.h`) that re-polls one
+  `bInterval` apart on NAK/overrun. Single keyboard and mouse work. A composite device
+  (Logitech Bolt 046d:c548, Microsoft 045e:0800 - both composite wireless receivers with
+  several interrupt-IN endpoints) enumerated and delivered data, but exposed a disconnect wedge:
+  once the device is gone the core cannot drain the periodic request queue, so polling channels
+  will not halt (`CHENA` stuck), which jams the host (port will not re-enable, next device will
+  not enumerate). `CDwcCore::DisableAllChannels` reports the stuck count and `HandleDisconnect`
+  recovers by re-running `HostInit` + `EnableInterrupts` (a core reset) whenever any channel is
+  stuck. Retest pending. Isochronous pipe creation still returns NULL.
+- Split transactions (hubs): control + bulk splits (Step 2) **verified** - FS and LS devices
+  enumerate behind a HS hub (`dwctt.h`/`dwctt.cpp` `CDwcTt`, one per TT via `AddedTt`; HCSPLT bits
+  in `dwc2reg.h`; split fields in `DWC_CHANNEL_SETUP`/`ChannelStart`; `CDwcPipe::OnSplitInterrupt`
+  SSPLIT/CSPLIT machine). HS mass storage behind a hub also works. Verified trap:
+  `m_fDoSplit` must **not** key off `ttContext`, which hcd2lib leaves NULL during the addr-0
+  enumeration of a device behind a hub; it is `!fIsHighSpeed && bHubAddress != 0` (device is
+  full/low speed and behind a real external hub; root-port devices report hub 0). For split
+  transactions the HCCHAR `MULTICNT` field is the error/retry count: 3 for interrupt/isoc, 1 for
+  control/bulk (dwc2 `hcd.c:1239`), already in `ChannelStart`.
+- Interrupt splits (Step 3) **implemented, not yet hardware-tested**: `CDwcTt::Reserve/Release`
+  gives each periodic split pipe a start microframe from a coarse per-microframe byte budget;
+  `OpenPipe` reserves it (releases in `ClosePipe`); `ScheduleNextInterval` aligns the start-split
+  to that microframe; and the interrupt-split handshake paths wait one poll interval (not an
+  immediate retry) when the endpoint has no data, so an idle HID endpoint does not hammer the TT.
+  Behind a HS hub `HFNUM` counts microframes, so a FS/LS interrupt interval is `bInterval * 8`.
+  Full plan in `~/.claude/plans/lucky-bouncing-frog.md`.
 - Design facts worth keeping: hcd2lib calls `AddedTt` for a full/low speed device on the root
   hub too, because the root hub is declared high speed; pipes with hub address 0 need no split.
   The device address comes with each `IssueTransfer`, not with pipe creation. Client callbacks
@@ -134,4 +156,8 @@ code into this BSP.**
   Visual Studio's Output window. Ask the user to save it to a file in the shared folder so
   you can read it.
 - `build.log`, `build.err` and `build.wrn` are written next to the platform in the VM. Ask for
-  them when a build fails.
+  them when a build fails. A single-directory `build` can fail only at the *copy to the flat
+  release dir* step (`NMAKE ... U1077: 'if'`, no `LNK` lines) while the link itself reports
+  `0 Errors`: an active **KITL connection holds a lock on the release-dir DLL**. Stop the
+  KITL/debugger connection, then rebuild. Confirm by comparing the cesysgen target DLL timestamp
+  (newer) with the one in `...\RelDir\raspi2_ARMV6_Debug\` (stale).

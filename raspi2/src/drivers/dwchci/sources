@@ -11,7 +11,8 @@ SOURCES= \
     system.cpp \
     dwccore.cpp \
     cdwchcd.cpp \
-    cpipe.cpp
+    cpipe.cpp \
+    dwctt.cpp
 
 TARGETLIBS= \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \

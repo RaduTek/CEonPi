@@ -1,7 +1,16 @@
 # USB host driver for CEonPi: plan and status
 
-Last updated: 2026-11-15, after writing milestone 4 (not yet built or tested).
-Milestone 3 is verified on hardware (a mouse and a keyboard enumerated; see the log facts below).
+Last updated: 2026-11-16. Milestones 1-4 verified on hardware (root-port HID works, incl. both
+composite receivers). Split transactions for hubs: **Step 2 (control + bulk splits) verified** -
+FS and LS devices enumerate behind a HS hub, and HS mass storage behind a hub works end to end
+(with `SYSGEN_FATFS` added to mount FAT drives). **Step 3 (interrupt splits + periodic microframe
+scheduler) is implemented but not yet hardware-tested.** Robustness (Step 4) is not done. Full
+design in `~/.claude/plans/lucky-bouncing-frog.md`.
+
+Verified split traps: `m_fDoSplit` must be `!fIsHighSpeed && bHubAddress != 0`, not keyed off
+`ttContext` (hcd2lib leaves it NULL during addr-0 enumeration behind a hub, which deadlocked
+enumeration); and for split transactions HCCHAR `MULTICNT` is the retry count (3 for
+interrupt/isoc, 1 for control/bulk, per dwc2).
 
 Goal: a keyboard or mouse working on the CE desktop when plugged directly into the Pi Zero's
 OTG port (no hub). Hubs, split transactions and USB Ethernet come later.
@@ -14,23 +23,29 @@ OTG port (no hub). Hubs, split transactions and USB Ethernet come later.
 | M1 Skeleton DLL, register dump | Done, verified on a Pi Zero |
 | M2 Core bring-up, root port detect | Done, verified on a Pi Zero (FS, LS, HS devices) |
 | M3 hcd2lib integration, control pipes, enumeration | Done, verified on a Pi Zero (mouse 045e:00cb, keyboard 17ef:60ba enumerated) |
-| M4 Interrupt and bulk pipes (HID works) | **Written, not built or tested** |
+| M4 Interrupt and bulk pipes (HID works) | Verified: single + composite HID work on the root port |
+| M6 Hubs / split transactions | Step 2 (control+bulk splits) **verified** (FS/LS enumerate, HS storage works behind a hub). Step 3 (interrupt splits + uframe scheduler) implemented, **test pending**. Step 4 (robustness) to do |
 | M5 Clean-up | Not started |
 
-Git state when this was written: M1, M2 and M3 are committed (`43669a4 Milestone 3: attach HCD
-to CE USB stack`, `42c4a39 Add agent documentation`). M4 is uncommitted changes in the working
-tree, touching only `src\drivers\dwchci` (`dwccore.h`, `cpipe.h/.cpp`, `cdwchcd.h/.cpp`).
-`bootlog.txt` is untracked.
+## Next step: build + test split Step 3 (interrupt splits behind a hub)
 
-## Next step: test M4
+Build `src\drivers\dwchci` once (Debug; **stop KITL first** so the release-dir DLL is not
+locked), makeimg, copy `kernel.img`, boot, and save the Output window to
+`C:\Dev\ceonpi\bootlog.txt`. `dwctt.cpp` is a new source in `sources`.
 
-1. Build `src\drivers\dwchci` in the **Debug** configuration, run makeimg, copy `kernel.img`.
-2. Boot, plug in a USB keyboard, type into a CE window. Plug in a USB mouse, move it and watch
-   the pointer. Unplug and replug each. Leave a device idle for a while to confirm the boot
-   stays responsive (the interrupt scheduler polls on every SOF while a HID device is attached).
-3. Save the Output window to `C:\Dev\ceonpi\bootlog.txt`.
+### Test: a HID device behind a hub
+1. Plug a **USB 2.0 hub** into the OTG port, then a **keyboard and/or mouse** into the hub (a FS
+   keyboard such as 17ef:60ba and a LS mouse such as 045e:00cb exercise both speeds).
+2. Expect, per HID interrupt endpoint, one `DWCHCI: split interrupt pipe ep 0x8x alive: first
+   packet N bytes`, and then **typing / pointer movement works in the CE UI** - no more
+   `interrupt split pipe ... not scheduled yet`.
+3. Regression: a keyboard/mouse on the **root port** and an HS device behind the hub must still
+   work. Watch for `split failed ... HCINT=...` (handshake/scheduler bug), repeated
+   `transfer failed ... ep 0x8x`, or a wedge where an idle endpoint keeps a channel busy.
+4. Robustness (preview of Step 4): unplug/replug on the hub; confirm clean teardown and that TT
+   bandwidth is released (a replugged device still opens its interrupt pipes).
 
-Expected log:
+Expected log (root-port HID, unchanged):
 - At load: the register dump as before, now ending `DeviceInitialize done (milestone 4: control,
   bulk and interrupt pipes)`, `HcdPdd_Init done`.
 - On plug-in: the same enumeration lines as M3 (`device descriptor ... VID xxxx PID xxxx`). The
@@ -50,9 +65,14 @@ If it fails:
 - The boot hangs or crawls while a HID device is attached: the SOF scheduler is mis-firing.
   Suspect the frame arithmetic (`CurFrame`/`FrameReached` in `dwccore.h`) or a leaked SOF
   waiter (the `m_dwSofWaiters` count in `cdwchcd.cpp` never returning to 0).
+- After removing a composite device the next one still will not enumerate even though the log
+  shows `resetting the controller` + `host init done`: the core reset recovery itself failed.
+  Check for `controller re-init after disconnect failed`, and whether `host init done` reports
+  sane FIFO/HPRT values. If the reset runs but re-enumeration still fails, the wedge is deeper
+  than the channels (suspect the port/PHY state) and may need a longer power-off of HPRT0.
 - `AHB (DMA) error`: wrong DMA bus address (but M3 already validated `DmaBusOffset=0x40000000`).
 - Link errors (unresolved externals from `hcd2lib`): read `Z:\platform\raspi2\Build.log`.
-- This code has never been compiled, so expect compile errors first.
+- The M4 code already builds and runs; only the disconnect fix in `dwccore.cpp` is new.
 
 ## How we work
 
@@ -125,6 +145,21 @@ Key design decisions:
 - Speed detection works for FS, LS and HS. `HFIR` = 59999 (FS/LS) or 7499 (HS).
 - Quirks: `DISCONNINT` fires around a port reset while the device is still connected, and
   `CONNDET` can re-latch from contact bounce. Check `HPRT0.CONNSTS` before acting.
+- Halting a channel on a *present* device needs `CHENA|CHDIS` written together (and an IN
+  channel turned to OUT, `EPDIR=0`), as `HaltAllChannels` does at init.
+- BUT once the device is physically gone, the core cannot drain the periodic request queue, so
+  a channel that was polling an interrupt-IN endpoint **will not halt at all**: `CHENA` never
+  clears and `CHHLTD` never fires. Verified on hardware with two composite wireless receivers
+  (Logitech Bolt 046d:c548 and Microsoft 045e:0800): the disconnect log showed
+  `disconnect halted 2 active channel(s), 2 stuck`. Two stuck channels wedge the whole host -
+  the port will not re-enable (`port did not enable after reset`) and no device re-enumerates
+  (hub logs `forcing descr type 0x0 to 0x1`, i.e. the control-IN returned zeros).
+- Flushing the FIFOs does not clear a stuck `CHENA`. The only reliable recovery is a **core
+  reset**. `HandleDisconnect` now re-runs `HostInit` + `EnableInterrupts` whenever
+  `DisableAllChannels` reports any stuck channel; this mirrors cold boot and leaves the port
+  powered, so a still-attached device is re-detected. Expect a
+  `... would not halt; resetting the controller` line followed by `host init done` on such a
+  disconnect, and then normal re-enumeration.
 
 ## Facts about hcd2lib that shaped the code
 
@@ -137,8 +172,9 @@ Key design decisions:
   with every `IssueTransfer`. `ChangeMaxPacketSize` is called after the first descriptor.
 - Because the root hub is declared high speed, the library calls `AddedTt(0, port)` for a
   full/low speed device on the root port and passes hub address 0 to the pipe. Rule used:
-  hub address 0 means no split; a non-high-speed device with a non-zero hub address needs
-  split transactions and `OpenPipe` refuses it.
+  split iff `!fIsHighSpeed && bHubAddress != 0` (full/low speed behind a real external hub).
+  `ttContext` is deliberately not used for this decision - the library leaves it NULL during
+  the addr-0 enumeration of a device behind a hub, so keying off it deadlocked enumeration.
 - Completion convention (from EHCI `CQTransfer::DoneTransfer`): copy IN data, set
   `*lpfComplete`, `*lpdwError`, `*lpdwBytesTransferred`, then call the callback, all in
   `__try`. Abort reports `USB_CANCELED_ERROR` and then calls the cancel callback.

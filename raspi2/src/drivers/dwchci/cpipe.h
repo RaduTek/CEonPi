@@ -136,6 +136,7 @@ private:
     void StartAttempt(void);
     void OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
                           DWORD dwNextPid, DWC_TRANSFER **ppDone);
+    void RetrySplit(void);              // interrupt: wait one interval; else now
     void ScheduleNextInterval(void);    // interrupt pipes: wait one interval
     void ClearFrameWait(void);          // drop a pending frame wait
     void ReleaseChannel(void);
@@ -164,6 +165,8 @@ private:
     BOOL            m_fWaitingChannel;  // head transfer waits for a free channel
     BOOL            m_fWaitingFrame;    // head transfer waits for its due frame
     DWORD           m_dwNextFrame;      // HFNUM value to start the next poll at
+    UCHAR           m_bStartUframe;     // interrupt split: reserved start microframe
+    BOOL            m_fTtReserved;      // interrupt split: TT bandwidth is reserved
     int             m_iChannel;         // channel in use, or -1
     DWORD           m_dwNextPid;        // data toggle of bulk/interrupt endpoints
     HANDLE          m_hAbortEvent;

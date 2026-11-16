@@ -7,9 +7,11 @@
 // (CDwcHcd::LockHc). Client callbacks and client buffers are only touched
 // in Complete(), which runs without the lock.
 //
-// Control, bulk and interrupt transfers on the root port, plus control and
-// bulk split transactions for a full/low speed device behind a high speed
-// hub (OnSplitInterrupt). Interrupt splits await the periodic scheduler.
+// Control, bulk and interrupt transfers on the root port, plus control, bulk
+// and interrupt split transactions for a full/low speed device behind a high
+// speed hub (OnSplitInterrupt). An interrupt split launches its start-split in
+// a microframe reserved from the hub's transaction translator (CDwcTt) and,
+// when the endpoint has no data, waits one poll interval before trying again.
 //
 #include <windows.h>
 #include <globals.hpp>
@@ -72,6 +74,11 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
         dwInterval = m_bInterval;
         if (dwInterval < 1)
             dwInterval = 1;
+        // A full/low speed device behind a high speed hub is clocked on a high
+        // speed bus, so HFNUM counts microframes while bInterval is in 1 ms
+        // frames: convert to microframes so the poll rate is right.
+        if (m_fDoSplit)
+            dwInterval *= 8;
     }
     if (dwInterval > (HFNUM_MAX_FRNUM + 1) / 2)
         dwInterval = (HFNUM_MAX_FRNUM + 1) / 2;
@@ -83,19 +90,12 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     m_fWaitingChannel = FALSE;
     m_fWaitingFrame = FALSE;
     m_dwNextFrame = 0;
+    m_bStartUframe = 0;
+    m_fTtReserved = FALSE;
     m_iChannel = -1;
     m_dwNextPid = HCTSIZ_PID_DATA0;
     m_pHead = NULL;
     m_hAbortEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-
-    // One-shot diagnostic: show exactly what hcd2lib hands us at pipe creation,
-    // so we can see why a full/low speed device behind an external hub is (or is
-    // not) flagged for split transactions. One line per pipe, at enumeration
-    // only -- not per transfer.
-    DWCMSG((TEXT("DWCHCI: new pipe ep 0x%02x type %d addr %d ls %d hs %d hub %d port %d tt %d -> split %d\r\n"),
-            m_bEndpointAddress, m_bEpType, bDeviceAddress,
-            fIsLowSpeed, fIsHighSpeed, bHubAddress, bHubPort,
-            (ttContext != NULL) ? 1 : 0, m_fDoSplit ? 1 : 0));
 }
 
 CDwcPipe::~CDwcPipe()
@@ -111,17 +111,29 @@ HCD_REQUEST_STATUS CDwcPipe::OpenPipe(void)
         return requestFailed;
 
     // A full/low speed device behind a high speed hub (m_fDoSplit) is reached
-    // through the hub's transaction translator with split transactions.
-    // Interrupt splits need the periodic microframe scheduler, which is a
-    // later step, so refuse them for now (control and bulk splits work, so the
-    // device still enumerates). A device on the root port, a high speed device,
-    // or a full/low speed device behind a full speed hub (no TT) uses plain
-    // transactions and needs nothing special here.
-    if (m_fDoSplit && m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT)
+    // through the hub's transaction translator with split transactions. An
+    // interrupt (periodic) split must launch its start-split in a fixed
+    // microframe, so reserve one from the hub's TT; if the TT is full, the pipe
+    // cannot be opened. Control and bulk splits, a device on the root port, a
+    // high speed device, or a full/low speed device behind a full speed hub (no
+    // TT) need nothing reserved here.
+    if (m_fDoSplit && m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT && !m_fTtReserved)
     {
-        DWCMSG((TEXT("DWCHCI: interrupt split pipe (hub %d port %d ep 0x%02x) not scheduled yet\r\n"),
-                m_bHubAddress, m_bHubPort, m_bEndpointAddress));
-        return requestFailed;
+        int iStart = 0;
+        if (m_pTt != NULL)
+        {
+            m_pHcd->LockHc();
+            iStart = m_pTt->Reserve(m_wMaxPacket);
+            m_pHcd->UnlockHc();
+            if (iStart < 0)
+            {
+                DWCMSG((TEXT("DWCHCI: no TT bandwidth for interrupt pipe (hub %d port %d ep 0x%02x)\r\n"),
+                        m_bHubAddress, m_bHubPort, m_bEndpointAddress));
+                return requestFailed;
+            }
+            m_fTtReserved = TRUE;
+        }
+        m_bStartUframe = (UCHAR)iStart;
     }
 
     m_pHcd->LockHc();
@@ -145,6 +157,12 @@ HCD_REQUEST_STATUS CDwcPipe::ClosePipe(void)
         return requestFailed;
     }
     m_fOpen = FALSE;        // no new transfers from now on
+    // Give back any periodic bandwidth this pipe reserved from the TT.
+    if (m_fTtReserved && m_pTt != NULL)
+    {
+        m_pTt->Release(m_bStartUframe, m_wMaxPacket);
+        m_fTtReserved = FALSE;
+    }
     m_pHcd->UnlockHc();
 
     // Cancel everything that is still queued
@@ -507,6 +525,18 @@ void CDwcPipe::Kick(void)
         StartAttempt();
 }
 
+// A split transfer whose endpoint had nothing to send (a NAK) or could not be
+// collected. For an interrupt endpoint, wait one poll interval before the next
+// start-split so an idle endpoint does not hammer the TT; control and bulk
+// retry at once. Lock held; the channel is already released.
+void CDwcPipe::RetrySplit(void)
+{
+    if (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT)
+        ScheduleNextInterval();
+    else
+        StartAttempt();
+}
+
 // Interrupt endpoint: the head transfer is not ready (NAK) or missed its
 // slot (frame overrun). Hold it and poll again one interval later. The
 // controller arms the start-of-frame interrupt while any pipe is waiting.
@@ -514,8 +544,19 @@ void CDwcPipe::Kick(void)
 void CDwcPipe::ScheduleNextInterval(void)
 {
     DWORD dwCur = m_pHcd->Core()->CurFrame();
+    DWORD dwNext = (dwCur + m_dwInterval) & HFNUM_MAX_FRNUM;
 
-    m_dwNextFrame = (dwCur + m_dwInterval) & HFNUM_MAX_FRNUM;
+    // A periodic split launches its start-split in the microframe reserved from
+    // the TT. HFNUM counts microframes on the high speed bus, so step forward
+    // to the next frame whose low three bits are the reserved microframe.
+    if (m_fDoSplit)
+    {
+        int iGuard = 0;
+        while ((dwNext & 7) != m_bStartUframe && iGuard++ < 8)
+            dwNext = (dwNext + 1) & HFNUM_MAX_FRNUM;
+    }
+
+    m_dwNextFrame = dwNext;
     if (!m_fWaitingFrame)
     {
         m_fWaitingFrame = TRUE;
@@ -818,6 +859,20 @@ void CDwcPipe::OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
         return;
     }
 
+    // A periodic split that only missed its frame window (frame overrun, no
+    // real error or completion): try again at the next poll interval without
+    // counting it against the error limit. Control/bulk never see this.
+    if ((dwHcint & HCINT_FRMOVRUN) &&
+        !(dwHcint & (HCINT_XFERCOMPL | HCINT_XACTERR | HCINT_BBLERR | HCINT_DATATGLERR)) &&
+        m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT)
+    {
+        pTransfer->fCompleteSplit = FALSE;
+        pTransfer->dwErrCount = 0;
+        pTransfer->dwNyetCount = 0;
+        ScheduleNextInterval();
+        return;
+    }
+
     // Transaction error, babble or data-toggle error: count toward the
     // three-strikes limit and restart from the start-split, or give up.
     if (dwHcint & (HCINT_XACTERR | HCINT_BBLERR | HCINT_DATATGLERR))
@@ -852,9 +907,10 @@ void CDwcPipe::OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
         }
         if (dwHcint & HCINT_NAK)
         {
-            // Device/TT not ready. Redo the start-split (control/bulk: at once).
+            // Device/TT not ready. Control/bulk redo the start-split at once;
+            // an interrupt endpoint waits for its next poll interval.
             pTransfer->dwErrCount = 0;
-            StartAttempt();
+            RetrySplit();
             return;
         }
         // Halt with no handshake: retry the start-split a few times.
@@ -938,25 +994,31 @@ void CDwcPipe::OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
 
     if (dwHcint & HCINT_NYET)
     {
-        // Data not ready at the TT yet. Re-issue the complete-split; after a
-        // few, start the whole split over so a stale TT state cannot wedge us.
+        // Data not ready at the TT yet. Re-issue the complete-split at once;
+        // after a few, start the whole split over so a stale TT state cannot
+        // wedge us (an interrupt endpoint restarts at its next poll interval).
         pTransfer->dwNyetCount++;
         if (pTransfer->dwNyetCount >= DWC_MAX_CSPLIT_NYET)
         {
             pTransfer->fCompleteSplit = FALSE;
             pTransfer->dwNyetCount = 0;
+            RetrySplit();
         }
-        StartAttempt();
+        else
+        {
+            StartAttempt();
+        }
         return;
     }
 
     if (dwHcint & HCINT_NAK)
     {
-        // Device NAKed through the TT. Go back to the start-split.
+        // Device NAKed through the TT (no data). Go back to the start-split;
+        // an interrupt endpoint waits for its next poll interval.
         pTransfer->fCompleteSplit = FALSE;
         pTransfer->dwErrCount = 0;
         pTransfer->dwNyetCount = 0;
-        StartAttempt();
+        RetrySplit();
         return;
     }
 
