@@ -196,6 +196,13 @@ ARM1176.
     the VideoCore mailbox** (the OAL has only the simple power mailbox; the property-tag query must
     be done driver-side, modelled on `src\bootloader\sloader\PropTest.cpp`). FreeBSD's
     `bcm2835_sdhci.c` (BSD) has the exact synthesized caps and the clock query to copy.
+- **M0.5 done and verified on a Pi Zero.** Rather than a driver-side mailbox, the base clock is
+  read through a new OAL IOCTL `IOCTL_HAL_MY_GET_EMMC_CLOCK` (`ioctl.c` `OALIoCtlHalGetEmmcClock`):
+  the VideoCore "get clock rate" property tag for the EMMC clock, via the OAL's mailbox and the
+  shared 0x2000 buffer (clean-before / invalidate-after for ARM<->VideoCore coherence; the buffer's
+  cached VA 0x80002000 doubles as the bus address, as the framebuffer path does). The probe reads it
+  with `KernelIoControl`. Result: **EMMC base clock = 200000000 Hz (200 MHz)** - this is
+  `BaseClockFrequency` for M1.
 
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle
