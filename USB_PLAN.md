@@ -4,12 +4,19 @@ Last updated: 2026-11-16. Milestones 1-4 verified on hardware (root-port HID wor
 composite receivers). Split transactions for hubs: **Step 2 (control + bulk splits) verified** -
 FS and LS devices enumerate behind a HS hub, and HS mass storage behind a hub works end to end
 (with `SYSGEN_FATFS` added to mount FAT drives). **Step 3 (interrupt splits + periodic microframe
-scheduler) tested: HID behind a hub delivers input.** A behind-hub disconnect bug is fixed:
-`ChannelForceOff` (the `AbortOne` fallback, the only teardown path for a device removed behind a
-hub since there is no root `DISCONNINT`) now halts a busy interrupt-IN channel with the `EPDIR=0`
-turnaround, instead of the ineffective clear-CHENA/set-CHDIS that left the periodic queue jammed
-(interrupt transfers dead, bulk still working). Remaining Step 4 robustness (NAK throttle, abort
-edge cases, file-transfer soak) is not done. Full design in `~/.claude/plans/lucky-bouncing-frog.md`.
+scheduler) verified on hardware: HID behind a hub delivers input.** A behind-hub disconnect bug is
+fixed and verified: `ChannelForceOff` (the `AbortOne` fallback, the only teardown path for a device
+removed behind a hub since there is no root `DISCONNINT`) now halts a busy interrupt-IN channel
+with the `EPDIR=0` turnaround, instead of the ineffective clear-CHENA/set-CHDIS that left the
+periodic queue jammed (interrupt transfers dead, bulk still working). Verified in a soak:
+repeated HID plug/unplug on the hub, hub unplug/replug, and flash-drive file transfers all work;
+`ChannelForceOff` never reported a stuck channel. Hubs with split transactions are now a done
+milestone. Full design in `~/.claude/plans/lucky-bouncing-frog.md`.
+
+Benign, not driver bugs: `HidMdd_ProcessInterruptReport: Queue is full. Dropping packet` is the CE
+HID MDD dropping a redundant report when GWES drains slower than input arrives (tunable via the HID
+MDD input-queue registry; harmless). A burst of `USBD: Invalid handle` during a disconnect is
+usbhid issuing on just-freed pipes; the device re-enumerates cleanly afterwards.
 
 Verified split traps: `m_fDoSplit` must be `!fIsHighSpeed && bHubAddress != 0`, not keyed off
 `ttContext` (hcd2lib leaves it NULL during addr-0 enumeration behind a hub, which deadlocked
@@ -28,7 +35,7 @@ OTG port (no hub). Hubs, split transactions and USB Ethernet come later.
 | M2 Core bring-up, root port detect | Done, verified on a Pi Zero (FS, LS, HS devices) |
 | M3 hcd2lib integration, control pipes, enumeration | Done, verified on a Pi Zero (mouse 045e:00cb, keyboard 17ef:60ba enumerated) |
 | M4 Interrupt and bulk pipes (HID works) | Verified: single + composite HID work on the root port |
-| M6 Hubs / split transactions | Step 2 (control+bulk splits) **verified** (FS/LS enumerate, HS storage works behind a hub). Step 3 (interrupt splits + uframe scheduler) implemented, **test pending**. Step 4 (robustness) to do |
+| M6 Hubs / split transactions | **Verified**: control+bulk+interrupt splits all work behind a hub (HID input, FS/LS enumerate, HS storage + file transfers), and behind-hub disconnect is handled. NAK-throttle refinement still optional |
 | M5 Clean-up | Not started |
 
 ## Next step: build + test split Step 3 (interrupt splits behind a hub)
