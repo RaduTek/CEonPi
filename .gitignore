@@ -1,6 +1,10 @@
 # Release dir
 RelDir/
 
+# Build output folders
+bin/
+obj/
+
 # VS files
 *.suo
 *.user
