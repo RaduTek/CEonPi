@@ -173,10 +173,36 @@ behind a high-speed hub. DMA needs bus addresses, not CE physical or virtual add
 check how the display driver passes addresses to the GPU. Cache coherency matters on the
 ARM1176.
 
+## SD card storage driver (goal: mount the SD card as a FAT volume in CE)
+- Plan/decision: drive the **Arasan eMMC (SDHCI)** controller at `0x20300000` (GPU IRQ 62) and
+  reuse the CE standard SD host MDD `SDHCBase.lib` (`CSDHCBase`/`CSDHCSlotBase`, under
+  `public\common\oak\drivers\sdcard\SDHCDrivers\SDIOStdHC\base`); write only a thin BCM2835 PDD, a
+  sibling of the shipped `pci` PDD. Not the Broadcom SDHOST (`0x20202000`, IRQ 56), which has no
+  datasheet and no MDD. Driver source is `src\drivers\sdhcbcm` (`sdhcbcm.dll`). DMA from the start
+  (the MDD has SDMA + 32-bit ADMA2 built in). Full plan: `~/.claude/plans/typed-weaving-flame.md`.
+- **M0 done and verified on a Pi Zero** (probe driver, register/GPIO dump at load):
+  - `MmMapIoSpace(0x20300000)` works from a kernel-mode driver.
+  - `HOST_VERSION=0x9902` (spec-version field 2 = SDHCI 3.00, vendor 0x99).
+  - `PRESENT_STATE=0x1fff0000`: card inserted, state stable, detect signal, write-enabled, all
+    CMD/DAT lines idle-high. The card is on the Arasan.
+  - GPIO 48-53 function-select = **ALT3** (`GPFSEL4=0x3f209809 GPFSEL5=0x00000fff`), which routes
+    those pins to this controller. So the firmware wired the SD card to the Arasan; no pin re-route
+    or `config.txt` change is needed.
+  - **`CAPABILITIES`=0x00000000 (both words).** The BCM2835 Arasan does not implement the SDHCI
+    capabilities register (Linux `SDHCI_QUIRK_MISSING_CAPS`; FreeBSD `bcm2835_sdhci` hardcodes caps
+    and reads the clock from the mailbox). Consequence for M1: the MDD reads caps in
+    `CSDHCSlotBase::Init` to derive base clock, DMA mode, Vdd windows and max block length, so the
+    PDD must **override `GetCapabilities()` to synthesize caps** and **supply the base clock from
+    the VideoCore mailbox** (the OAL has only the simple power mailbox; the property-tag query must
+    be done driver-side, modelled on `src\bootloader\sloader\PropTest.cpp`). FreeBSD's
+    `bcm2835_sdhci.c` (BSD) has the exact synthesized caps and the clock query to copy.
+
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle
-projects all drive this controller. Use them as documentation. **Check each licence before copying
-code into this BSP.**
+projects all drive the USB controller. For the SD host, FreeBSD `bcm2835_sdhci.c`/`bcm2835_sdhost.c`
+(BSD) and NetBSD `sdhc.c` (BSD) are the permissive references; Linux (`bcm2835.c`,
+`sdhci-bcm2835.c`) and U-Boot are GPL (documentation only). Use them all as documentation.
+**Check each licence before copying code into this BSP.**
 
 ## Debugging notes
 - Kernel debug output goes through KITL (`KITLOutputDebugString`, `RETAILMSG` and `DEBUGMSG`) to
