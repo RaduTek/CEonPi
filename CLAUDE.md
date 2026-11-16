@@ -115,13 +115,19 @@ controller so keyboards, mice and USB Ethernet work.
   full/low speed and behind a real external hub; root-port devices report hub 0). For split
   transactions the HCCHAR `MULTICNT` field is the error/retry count: 3 for interrupt/isoc, 1 for
   control/bulk (dwc2 `hcd.c:1239`), already in `ChannelStart`.
-- Interrupt splits (Step 3) **implemented, not yet hardware-tested**: `CDwcTt::Reserve/Release`
-  gives each periodic split pipe a start microframe from a coarse per-microframe byte budget;
-  `OpenPipe` reserves it (releases in `ClosePipe`); `ScheduleNextInterval` aligns the start-split
-  to that microframe; and the interrupt-split handshake paths wait one poll interval (not an
-  immediate retry) when the endpoint has no data, so an idle HID endpoint does not hammer the TT.
-  Behind a HS hub `HFNUM` counts microframes, so a FS/LS interrupt interval is `bInterval * 8`.
-  Full plan in `~/.claude/plans/lucky-bouncing-frog.md`.
+- Interrupt splits (Step 3) tested on hardware: HID behind a hub delivers input (`split interrupt
+  pipe ep 0x8x alive`). `CDwcTt::Reserve/Release` gives each periodic split pipe a start microframe
+  from a coarse per-microframe byte budget; `OpenPipe` reserves it (releases in `ClosePipe`);
+  `ScheduleNextInterval` aligns the start-split to that microframe; and the interrupt-split
+  handshake paths wait one poll interval (not an immediate retry) when the endpoint has no data, so
+  an idle HID endpoint does not hammer the TT. Behind a HS hub `HFNUM` counts microframes, so a
+  FS/LS interrupt interval is `bInterval * 8`. Full plan in `~/.claude/plans/lucky-bouncing-frog.md`.
+- Behind-hub disconnect fix: unplugging a HID device from a hub raises no root-port `DISCONNINT`,
+  so the `HandleDisconnect` reset-recovery never runs; teardown goes through `AbortTransfer` ->
+  `AbortOne` -> `ChannelForceOff`. `ChannelForceOff` must halt a busy interrupt-IN channel the
+  same way `DisableAllChannels` does (turn it to OUT, `EPDIR=0`, with `CHENA|CHDIS`, then wait),
+  or the stuck channel jams the periodic request queue and all interrupt transfers die while bulk
+  (non-periodic queue) keeps working - observed as HID that never recovers after a hub unplug.
 - Design facts worth keeping: hcd2lib calls `AddedTt` for a full/low speed device on the root
   hub too, because the root hub is declared high speed; pipes with hub address 0 need no split.
   The device address comes with each `IssueTransfer`, not with pipe creation. Client callbacks

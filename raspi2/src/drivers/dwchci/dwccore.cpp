@@ -518,16 +518,26 @@ void CDwcCore::ChannelRelease(DWORD dwCh)
     Wr(HCINT(dwCh), HCINT_ALL);
 }
 
-// Last resort when a halt request is not answered (port disabled)
+// Last resort when a halt request is not answered: the device stopped
+// responding (unplugged behind a hub, or the port was disabled), so the
+// in-flight transaction will never complete on its own. Halt the channel the
+// same way DisableAllChannels() does - turn a busy IN channel around to OUT
+// (EPDIR = 0) and write CHENA together with CHDIS, then wait briefly for the
+// halt. A plain "clear CHENA, set CHDIS" leaves a busy interrupt-IN channel
+// wedged, which jams the periodic request queue so no further interrupt
+// transfers run (bulk, on the non-periodic queue, keeps working) - the failure
+// seen when a HID device is unplugged from a hub.
 void CDwcCore::ChannelForceOff(DWORD dwCh)
 {
     DWORD dwChar = Rd(HCCHAR(dwCh));
 
     if (dwChar & HCCHAR_CHENA)
     {
-        dwChar &= ~HCCHAR_CHENA;
-        dwChar |= HCCHAR_CHDIS;
+        dwChar &= ~HCCHAR_EPDIR_IN;
+        dwChar |= HCCHAR_CHENA | HCCHAR_CHDIS;
         Wr(HCCHAR(dwCh), dwChar);
+        if (!WaitBits(HCCHAR(dwCh), HCCHAR_CHENA, 0, DWC_CH_HALT_MS))
+            DWCMSG((TEXT("DWCHCI: ChannelForceOff: channel %d would not halt\r\n"), dwCh));
     }
     ChannelRelease(dwCh);
 }

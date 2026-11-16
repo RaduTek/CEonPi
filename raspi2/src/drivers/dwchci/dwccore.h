@@ -100,7 +100,7 @@ public:
     void  ChannelStart(DWORD dwCh, const DWC_CHANNEL_SETUP *pSetup);
     BOOL  ChannelRequestHalt(DWORD dwCh);   // FALSE: channel is not running
     void  ChannelRelease(DWORD dwCh);       // mask the channel's interrupts
-    void  ChannelForceOff(DWORD dwCh);      // disable without waiting for the halt
+    void  ChannelForceOff(DWORD dwCh);      // force a stuck channel to halt (IN turnaround)
     DWORD ChannelReadAndClearInt(DWORD dwCh);
     DWORD ChannelBytesLeft(DWORD dwCh) const
     {

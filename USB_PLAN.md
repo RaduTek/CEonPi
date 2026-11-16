@@ -4,8 +4,12 @@ Last updated: 2026-11-16. Milestones 1-4 verified on hardware (root-port HID wor
 composite receivers). Split transactions for hubs: **Step 2 (control + bulk splits) verified** -
 FS and LS devices enumerate behind a HS hub, and HS mass storage behind a hub works end to end
 (with `SYSGEN_FATFS` added to mount FAT drives). **Step 3 (interrupt splits + periodic microframe
-scheduler) is implemented but not yet hardware-tested.** Robustness (Step 4) is not done. Full
-design in `~/.claude/plans/lucky-bouncing-frog.md`.
+scheduler) tested: HID behind a hub delivers input.** A behind-hub disconnect bug is fixed:
+`ChannelForceOff` (the `AbortOne` fallback, the only teardown path for a device removed behind a
+hub since there is no root `DISCONNINT`) now halts a busy interrupt-IN channel with the `EPDIR=0`
+turnaround, instead of the ineffective clear-CHENA/set-CHDIS that left the periodic queue jammed
+(interrupt transfers dead, bulk still working). Remaining Step 4 robustness (NAK throttle, abort
+edge cases, file-transfer soak) is not done. Full design in `~/.claude/plans/lucky-bouncing-frog.md`.
 
 Verified split traps: `m_fDoSplit` must be `!fIsHighSpeed && bHubAddress != 0`, not keyed off
 `ttContext` (hcd2lib leaves it NULL during addr-0 enumeration behind a hub, which deadlocked
