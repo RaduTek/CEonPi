@@ -137,6 +137,12 @@ All images are built by default with KITL enabled. To build without kitl disable
 
 By default, any image that has KITL enabled will output some initial diagnostic information to the video screen on boot.  To prevent this, disable KITL (`IMGNOKITL=1`) and rebuild the BSP.
 
+**Update**: Newer Raspberry Pi firmware sets the UART at a higher frequency (48 MHz) than before, so UART won't work by default, and you'll see `UART_readData Error! 5xx` on screen. To fix this, add this line to `config.txt`:
+
+    init_uart_clock=3000000
+
+to set the UART clock to 3 MHz.
+
 ### Disabling KITL
 
 By default all three builds have KITL enabled because the BSP doesn’t yet support USB and therefore neither keyboards or mice can be used. However, this also means that all the images require the FTDI serial connection.
@@ -151,7 +157,7 @@ Select the Target | Connectivity Options menu in Platform Builder. In the left p
 
 Under "Kernel Download" select None. We won’t be downloading the image as it will already be on the SD card. Note, it is possible to download a kernel image but the images are large enough and serial slow enough that it is much more practical to simply copy over kernel.img to the device on the SD card.
 
-Under "Kernel Transport" select "Serial". Click on the Settings button next to the Kernel Transport dropdown.  Enter the COM port settings for the port that was added when you connected the FTDI board to your PC via USB. To determine the port, you may need to look in the Windows Device Manager. Note this is the serial port on the Windows side, not UART 1 on the Raspberry Pi. Set the speed to **460800**, parity to None, Data bits to 8, Stop bits to 1 and the Flow Control to Hardware. Click OK to close and confirm these settings.  They should now show up on the main dialog underneath the Kernel Transport dropdown. Click on the Apply button and then the Close button to lock in these changes.
+Under "Kernel Transport" select "Serial". Click on the Settings button next to the Kernel Transport dropdown.  Enter the COM port settings for the port that was added when you connected the FDTI board to your PC via USB. To determine the port, you may need to look in the Windows Device Manager. Note this is the serial port on the Windows side, not UART 1 on the Raspberry Pi. Set the speed to 115200, parity to None, Data bits to 8, Stop bits to 1 and the Flow Control to Hardware. Click OK to close and confirm these settings.  They should now show up on the main dialog underneath the Kernel Transport dropdown. Click on the Apply button and then the Close button to lock in these changes.
 
 In Platform Builder, make sure the "device" toolbar is displayed. It will have a dropdown box that indicates the KITL target device. Make sure it is set to the name you gave the target device when configuring KITL.
 

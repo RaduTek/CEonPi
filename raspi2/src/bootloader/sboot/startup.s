@@ -156,17 +156,17 @@ ResetHandler
 
 ;------------------------------
 ; Setup UART0 
-; Baud rate at 460.8 == integer divisor 6, fractional divisor 33
+; Baud rate at 115.2 == integer divisor 1, fractional divisor 40
 ;------------------------------
 
 ; Set integer divisor
 	ldr		r0, =UART0_PA_IBRD		; UART0 Integer Baud rate divisor 
-	ldr		r1, =6					; Integer divisor = 6
+	ldr		r1, =0x01				; Integer divisor = 1
 	str		r1,[r0]					; Set Reg
 
 ; Set fractional divisor
 	ldr		r0, =UART0_PA_BBRD		; UART0 Fractional Baud rate divisor
-	ldr		r1, =33					; Fractional divisor = 33
+	ldr		r1, =40					; Fractional divisor = 40
 	str		r1,[r0]					; Set Reg
 
 ; Set line control register (No parity 8bits 1 stop bit)
