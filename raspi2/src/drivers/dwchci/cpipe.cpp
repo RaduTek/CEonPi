@@ -34,13 +34,17 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     , m_bHubAddress(bHubAddress)
     , m_bHubPort(bHubPort)
     , m_bInterval(lpEndpointDescriptor->bInterval)
-    // The library hands back a non-NULL ttContext for every full/low speed
-    // device whose nearest high speed ancestor is a hub -- but the root hub is
-    // declared high speed, so it does this for a full/low speed device on the
-    // root port too (bHubAddress == 0). Those reach the controller directly and
-    // need no split; split transactions are required only when the device sits
-    // behind a real external hub (bHubAddress != 0).
-    , m_fDoSplit(ttContext != NULL && bHubAddress != 0)
+    // Split transactions are needed for a full/low speed device reached through
+    // a high speed hub's transaction translator. The deciding facts are the
+    // device speed and the hub it hangs off, both known here:
+    //   * full or low speed (not high speed), and
+    //   * behind a real external hub (bHubAddress != 0; a device on the root
+    //     port reports hub 0 and talks to the controller directly).
+    // ttContext is NOT used for this: hcd2lib leaves it NULL during the addr-0
+    // enumeration of a device behind a hub (the TT is associated only after the
+    // device is addressed), so gating on it would deadlock enumeration. The
+    // split path uses m_bHubAddress/m_bHubPort directly, so a NULL TT is fine.
+    , m_fDoSplit(!fIsHighSpeed && bHubAddress != 0)
     , m_pTt((CDwcTt *)ttContext)
 {
     DWORD dwInterval;
