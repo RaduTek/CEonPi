@@ -34,10 +34,13 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     , m_bHubAddress(bHubAddress)
     , m_bHubPort(bHubPort)
     , m_bInterval(lpEndpointDescriptor->bInterval)
-    // The library supplies a non-NULL ttContext only for a full/low speed
-    // device behind a high speed hub, i.e. exactly when split transactions
-    // are required.
-    , m_fDoSplit(ttContext != NULL)
+    // The library hands back a non-NULL ttContext for every full/low speed
+    // device whose nearest high speed ancestor is a hub -- but the root hub is
+    // declared high speed, so it does this for a full/low speed device on the
+    // root port too (bHubAddress == 0). Those reach the controller directly and
+    // need no split; split transactions are required only when the device sits
+    // behind a real external hub (bHubAddress != 0).
+    , m_fDoSplit(ttContext != NULL && bHubAddress != 0)
     , m_pTt((CDwcTt *)ttContext)
 {
     DWORD dwInterval;
