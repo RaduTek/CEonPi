@@ -7,6 +7,18 @@
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_standardshell" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_shell" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_toolhelp" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_usb" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_usb_hid_clients" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_usb_storage" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_fatfs" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_mspart" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_xpskin" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_commdlg" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_ctlpnl" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_commctrl_animate" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_commctrl" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_connmc" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_menu_tap_ui" />
   </FeatureCollection>
   <ConfigurationCollection Name="Configurations" EnforceUniqueItems="False">
     <Configuration Name="Item" TargetBinFilename="nk.bin" BuildType="Debug" FriendlyName="raspi2 ARMV6 Debug">
