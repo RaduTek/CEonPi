@@ -68,8 +68,8 @@ controller so keyboards, mice and USB Ethernet work.
   base address `0x20980000`.
 
 ## USB driver: progress (2026-11-15)
-- **Read `USB_PLAN.md` in the repo root first.** It holds the current plan, milestone status,
-  the next test step, verified hardware facts and the design of the next milestone.
+- **Read `docs/usb.md` first.** It documents the driver's current state, architecture, verified
+  hardware facts, the low-speed-behind-a-FS-hub limitation and the remaining work / future goals.
 - Driver source is `src/drivers/dwchci` (`dwchci.dll`, links the CE `hcd2lib`, loaded from
   `Drivers\BuiltIn\DWCUsbHost`). The milestones M0-M5 replace steps 2-4 below: after
   root-port bring-up the driver plugs straight into the CE USB stack.
