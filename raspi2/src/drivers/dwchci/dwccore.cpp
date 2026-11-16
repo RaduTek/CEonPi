@@ -440,17 +440,32 @@ void CDwcCore::PortEnabled(DWORD dwHprt)
 // the reason. The reason is in the other HCINT bits.
 void CDwcCore::ChannelStart(DWORD dwCh, const DWC_CHANNEL_SETUP *pSetup)
 {
-    DWORD dwChar;
+    DWORD dwChar, dwSplt, dwMultiCnt, dwXferSize, dwPackets;
 
     // Clear old events, enable only halted and bus error
     Wr(HCINT(dwCh), HCINT_ALL);
     Wr(HCINTMSK(dwCh), HCINT_CHHLTD | HCINT_AHBERR);
     Wr(HAINTMSK, Rd(HAINTMSK) | DWC_BIT(dwCh));
 
+    // A split transaction moves one packet per start-split/complete-split
+    // pair. dwEpType is a raw code (0 ctrl, 1 isoc, 2 bulk, 3 intr) so this
+    // layer stays independent of the CE USB headers.
+    dwMultiCnt = 1;
+    dwXferSize = pSetup->dwBytes;
+    dwPackets  = pSetup->dwPackets;
+    if (pSetup->fDoSplit)
+    {
+        dwPackets = 1;
+        if (pSetup->dwEpType == 3 || pSetup->dwEpType == 1)
+            dwMultiCnt = 3;             // interrupt/isochronous split (DWC errata)
+        if (pSetup->fCompleteSplit && !pSetup->fIn)
+            dwXferSize = 0;             // complete-split OUT carries no payload
+    }
+
     dwChar = (pSetup->dwMaxPacket & HCCHAR_MPS_MASK)
            | ((pSetup->dwEpNum & 0xF) << HCCHAR_EPNUM_SHIFT)
            | ((pSetup->dwEpType & 0x3) << HCCHAR_EPTYPE_SHIFT)
-           | (1UL << HCCHAR_MULTICNT_SHIFT)
+           | ((dwMultiCnt & 0x3) << HCCHAR_MULTICNT_SHIFT)
            | ((pSetup->dwDevAddr & 0x7F) << HCCHAR_DEVADDR_SHIFT);
     if (pSetup->fIn)
         dwChar |= HCCHAR_EPDIR_IN;
@@ -459,10 +474,21 @@ void CDwcCore::ChannelStart(DWORD dwCh, const DWC_CHANNEL_SETUP *pSetup)
     if (pSetup->fOddFrame)
         dwChar |= HCCHAR_ODDFRM;
 
+    dwSplt = 0;
+    if (pSetup->fDoSplit)
+    {
+        dwSplt = HCSPLT_SPLTENA
+               | ((pSetup->dwXactPos << HCSPLT_XACTPOS_SHIFT) & HCSPLT_XACTPOS_MASK)
+               | ((pSetup->dwHubAddr << HCSPLT_HUBADDR_SHIFT) & HCSPLT_HUBADDR_MASK)
+               | ((pSetup->dwHubPort << HCSPLT_PRTADDR_SHIFT) & HCSPLT_PRTADDR_MASK);
+        if (pSetup->fCompleteSplit)
+            dwSplt |= HCSPLT_COMPSPLT;
+    }
+
     Wr(HCCHAR(dwCh), dwChar);
-    Wr(HCSPLT(dwCh), 0);
-    Wr(HCTSIZ(dwCh), (pSetup->dwBytes & HCTSIZ_XFERSIZE_MASK)
-                   | ((pSetup->dwPackets << HCTSIZ_PKTCNT_SHIFT) & HCTSIZ_PKTCNT_MASK)
+    Wr(HCSPLT(dwCh), dwSplt);
+    Wr(HCTSIZ(dwCh), (dwXferSize & HCTSIZ_XFERSIZE_MASK)
+                   | ((dwPackets << HCTSIZ_PKTCNT_SHIFT) & HCTSIZ_PKTCNT_MASK)
                    | ((pSetup->dwPid << HCTSIZ_PID_SHIFT) & HCTSIZ_PID_MASK));
     Wr(HCDMA(dwCh), pSetup->dwDmaAddr);
 

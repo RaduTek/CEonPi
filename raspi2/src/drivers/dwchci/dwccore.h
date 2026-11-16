@@ -39,6 +39,12 @@ typedef struct _DWC_CHANNEL_SETUP
     DWORD dwPackets;        // packet count programmed into the channel
     DWORD dwDmaAddr;        // bus address of the buffer
     BOOL  fOddFrame;        // periodic endpoints: send in an odd (micro)frame
+    // Split transaction (full/low speed device behind a high speed hub)
+    BOOL  fDoSplit;         // this attempt is a split transaction
+    BOOL  fCompleteSplit;   // FALSE = start-split, TRUE = complete-split
+    DWORD dwHubAddr;        // TT hub device address
+    DWORD dwHubPort;        // hub port the device is on
+    DWORD dwXactPos;        // HCSPLT_XACTPOS_xxx (ALL for control/bulk/interrupt)
 } DWC_CHANNEL_SETUP;
 
 class CDwcCore

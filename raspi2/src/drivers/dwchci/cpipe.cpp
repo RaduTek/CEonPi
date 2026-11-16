@@ -7,13 +7,16 @@
 // (CDwcHcd::LockHc). Client callbacks and client buffers are only touched
 // in Complete(), which runs without the lock.
 //
-// Milestone 3: control transfers, no split transactions.
+// Control, bulk and interrupt transfers on the root port, plus control and
+// bulk split transactions for a full/low speed device behind a high speed
+// hub (OnSplitInterrupt). Interrupt splits await the periodic scheduler.
 //
 #include <windows.h>
 #include <globals.hpp>
 #include <hcd.hpp>
 #include "cdwchcd.h"
 #include "cpipe.h"
+#include "dwctt.h"
 
 #define DWCMSG(x)   RETAILMSG(1, x)
 
@@ -21,6 +24,7 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
                    IN const BOOL fIsLowSpeed, IN const BOOL fIsHighSpeed,
                    IN const UCHAR bDeviceAddress,
                    IN const UCHAR bHubAddress, IN const UCHAR bHubPort,
+                   IN const PVOID ttContext,
                    IN CDwcHcd * const pHcd)
     : CPipeAbs(lpEndpointDescriptor->bEndpointAddress)
     , m_pHcd(pHcd)
@@ -30,6 +34,11 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     , m_bHubAddress(bHubAddress)
     , m_bHubPort(bHubPort)
     , m_bInterval(lpEndpointDescriptor->bInterval)
+    // The library supplies a non-NULL ttContext only for a full/low speed
+    // device behind a high speed hub, i.e. exactly when split transactions
+    // are required.
+    , m_fDoSplit(ttContext != NULL)
+    , m_pTt((CDwcTt *)ttContext)
 {
     DWORD dwInterval;
 
@@ -85,13 +94,17 @@ HCD_REQUEST_STATUS CDwcPipe::OpenPipe(void)
     if (m_hAbortEvent == NULL)
         return requestFailed;
 
-    // A full or low speed device behind a high speed hub needs split
-    // transactions, which are not implemented. Directly on the root port
-    // (hub address 0) no split is needed.
-    if (!m_fHighSpeed && m_bHubAddress != 0)
+    // A full/low speed device behind a high speed hub (m_fDoSplit) is reached
+    // through the hub's transaction translator with split transactions.
+    // Interrupt splits need the periodic microframe scheduler, which is a
+    // later step, so refuse them for now (control and bulk splits work, so the
+    // device still enumerates). A device on the root port, a high speed device,
+    // or a full/low speed device behind a full speed hub (no TT) uses plain
+    // transactions and needs nothing special here.
+    if (m_fDoSplit && m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT)
     {
-        DWCMSG((TEXT("DWCHCI: full/low speed device behind hub %d port %d needs split transactions: not supported yet\r\n"),
-                m_bHubAddress, m_bHubPort));
+        DWCMSG((TEXT("DWCHCI: interrupt split pipe (hub %d port %d ep 0x%02x) not scheduled yet\r\n"),
+                m_bHubAddress, m_bHubPort, m_bEndpointAddress));
         return requestFailed;
     }
 
@@ -432,6 +445,25 @@ void CDwcPipe::StartAttempt(void)
         break;
     }
 
+    // Split transaction: route through the hub's TT and move one packet per
+    // start-split/complete-split pair. fCompleteSplit selects the phase.
+    if (m_fDoSplit)
+    {
+        s.fDoSplit = TRUE;
+        s.fCompleteSplit = pTransfer->fCompleteSplit;
+        s.dwHubAddr = m_bHubAddress;
+        s.dwHubPort = m_bHubPort;
+        s.dwXactPos = HCSPLT_XACTPOS_ALL;
+        if (s.dwPackets > 1)
+        {
+            s.dwPackets = 1;
+            if (s.fIn)
+                s.dwBytes = dwMps;
+            else if (s.dwBytes > dwMps)
+                s.dwBytes = dwMps;
+        }
+    }
+
     pTransfer->fAttemptIn = s.fIn;
     pTransfer->cbAttempt = s.dwBytes;
     pTransfer->dwAttemptPackets = s.dwPackets;
@@ -593,6 +625,13 @@ void CDwcPipe::OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone)
         return;
     }
 
+    // Split transactions run their own start-split/complete-split machine.
+    if (m_fDoSplit)
+    {
+        OnSplitInterrupt(dwHcint, dwStage, dwBytesLeft, dwNextPid, ppDone);
+        return;
+    }
+
     if (dwHcint & HCINT_XFERCOMPL)
     {
         pTransfer->dwErrCount = 0;
@@ -737,6 +776,186 @@ void CDwcPipe::OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone)
     DWCMSG((TEXT("DWCHCI: transfer failed, addr %d ep 0x%02x stage %d HCINT=0x%08x\r\n"),
             pTransfer->bAddress, m_bEndpointAddress, dwStage, dwHcint));
     Finish(pTransfer, dwErr, ppDone);
+}
+
+// Split-transaction state machine. The channel has halted; decode the
+// handshake and drive the start-split / complete-split sequence. One USB
+// packet needs a start-split (SSPLIT) to the hub's TT, then one or more
+// complete-splits (CSPLIT) to collect the result. Lock held; the channel is
+// already released. Mirrors Linux dwc2 dwc2_hc_ack/nak/nyet/xacterr_intr.
+void CDwcPipe::OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
+                                DWORD dwNextPid, DWC_TRANSFER **ppDone)
+{
+    DWC_TRANSFER *pTransfer = m_pHead;
+    DWORD dwGot, dwRemaining, dwErr;
+    BOOL fDone;
+
+    // A stall is terminal regardless of split phase.
+    if (dwHcint & HCINT_STALL)
+    {
+        if (m_bEpType != USB_ENDPOINT_TYPE_CONTROL)
+        {
+            m_fHalted = TRUE;
+            m_dwNextPid = HCTSIZ_PID_DATA0;
+        }
+        Finish(pTransfer, USB_STALL_ERROR, ppDone);
+        return;
+    }
+
+    // Transaction error, babble or data-toggle error: count toward the
+    // three-strikes limit and restart from the start-split, or give up.
+    if (dwHcint & (HCINT_XACTERR | HCINT_BBLERR | HCINT_DATATGLERR))
+    {
+        pTransfer->dwErrCount++;
+        if (pTransfer->dwErrCount < DWC_MAX_ERRORS)
+        {
+            pTransfer->fCompleteSplit = FALSE;
+            pTransfer->dwNyetCount = 0;
+            StartAttempt();
+            return;
+        }
+        dwErr = (dwHcint & HCINT_BBLERR) ? USB_DATA_OVERRUN_ERROR : USB_DEVICE_NOT_RESPONDING_ERROR;
+        DWCMSG((TEXT("DWCHCI: split failed, addr %d ep 0x%02x stage %d HCINT=0x%08x\r\n"),
+                pTransfer->bAddress, m_bEndpointAddress, dwStage, dwHcint));
+        Finish(pTransfer, dwErr, ppDone);
+        return;
+    }
+
+    if (!pTransfer->fCompleteSplit)
+    {
+        // ---- Start-split phase ----
+        if (dwHcint & HCINT_ACK)
+        {
+            // The TT accepted the start-split; collect it with a complete-split.
+            pTransfer->fCompleteSplit = TRUE;
+            pTransfer->dwErrCount = 0;
+            pTransfer->dwNakCount = 0;
+            pTransfer->dwNyetCount = 0;
+            StartAttempt();
+            return;
+        }
+        if (dwHcint & HCINT_NAK)
+        {
+            // Device/TT not ready. Redo the start-split (control/bulk: at once).
+            pTransfer->dwErrCount = 0;
+            StartAttempt();
+            return;
+        }
+        // Halt with no handshake: retry the start-split a few times.
+        pTransfer->dwErrCount++;
+        if (pTransfer->dwErrCount < DWC_MAX_ERRORS)
+        {
+            StartAttempt();
+            return;
+        }
+        DWCMSG((TEXT("DWCHCI: split SSPLIT no response, addr %d ep 0x%02x HCINT=0x%08x\r\n"),
+                pTransfer->bAddress, m_bEndpointAddress, dwHcint));
+        Finish(pTransfer, USB_DEVICE_NOT_RESPONDING_ERROR, ppDone);
+        return;
+    }
+
+    // ---- Complete-split phase ----
+    if (dwHcint & HCINT_XFERCOMPL)
+    {
+        pTransfer->fCompleteSplit = FALSE;      // this packet is done
+        pTransfer->dwErrCount = 0;
+        pTransfer->dwNakCount = 0;
+        pTransfer->dwNyetCount = 0;
+
+        switch (dwStage)
+        {
+        case DWC_STAGE_SETUP:
+            pTransfer->dwStage = (pTransfer->dwBufferSize > 0) ? DWC_STAGE_DATA : DWC_STAGE_STATUS;
+            pTransfer->dwPid = HCTSIZ_PID_DATA1;
+            StartAttempt();
+            break;
+
+        case DWC_STAGE_DATA:
+            dwRemaining = pTransfer->dwBufferSize - pTransfer->cbDone;
+            if (pTransfer->fAttemptIn)
+            {
+                dwGot = (dwBytesLeft <= pTransfer->cbAttempt) ? (pTransfer->cbAttempt - dwBytesLeft) : 0;
+                fDone = (dwGot < pTransfer->cbAttempt);      // short packet ends it
+                if (dwGot > dwRemaining)
+                    dwGot = dwRemaining;
+            }
+            else
+            {
+                dwGot = pTransfer->cbAttempt;
+                fDone = FALSE;
+            }
+            pTransfer->cbDone += dwGot;
+            pTransfer->dwPid = dwNextPid;
+            if (pTransfer->cbDone >= pTransfer->dwBufferSize)
+                fDone = TRUE;
+
+            if (!fDone)
+            {
+                StartAttempt();         // next packet: a fresh start-split
+            }
+            else if (m_bEpType == USB_ENDPOINT_TYPE_CONTROL)
+            {
+                pTransfer->dwStage = DWC_STAGE_STATUS;
+                StartAttempt();
+            }
+            else
+            {
+                m_dwNextPid = dwNextPid;
+                if (!m_fLoggedData)
+                {
+                    m_fLoggedData = TRUE;
+                    DWCMSG((TEXT("DWCHCI: split %s pipe ep 0x%02x alive: first packet %d bytes\r\n"),
+                            (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT) ? TEXT("interrupt") : TEXT("bulk"),
+                            m_bEndpointAddress, pTransfer->cbDone));
+                }
+                Finish(pTransfer, USB_NO_ERROR, ppDone);
+            }
+            break;
+
+        case DWC_STAGE_STATUS:
+        default:
+            Finish(pTransfer, USB_NO_ERROR, ppDone);
+            break;
+        }
+        return;
+    }
+
+    if (dwHcint & HCINT_NYET)
+    {
+        // Data not ready at the TT yet. Re-issue the complete-split; after a
+        // few, start the whole split over so a stale TT state cannot wedge us.
+        pTransfer->dwNyetCount++;
+        if (pTransfer->dwNyetCount >= DWC_MAX_CSPLIT_NYET)
+        {
+            pTransfer->fCompleteSplit = FALSE;
+            pTransfer->dwNyetCount = 0;
+        }
+        StartAttempt();
+        return;
+    }
+
+    if (dwHcint & HCINT_NAK)
+    {
+        // Device NAKed through the TT. Go back to the start-split.
+        pTransfer->fCompleteSplit = FALSE;
+        pTransfer->dwErrCount = 0;
+        pTransfer->dwNyetCount = 0;
+        StartAttempt();
+        return;
+    }
+
+    // Halt with no recognised handshake on the complete-split: retry from the
+    // start-split a few times, then give up.
+    pTransfer->dwErrCount++;
+    if (pTransfer->dwErrCount < DWC_MAX_ERRORS)
+    {
+        pTransfer->fCompleteSplit = FALSE;
+        StartAttempt();
+        return;
+    }
+    DWCMSG((TEXT("DWCHCI: split CSPLIT no response, addr %d ep 0x%02x HCINT=0x%08x\r\n"),
+            pTransfer->bAddress, m_bEndpointAddress, dwHcint));
+    Finish(pTransfer, USB_DEVICE_NOT_RESPONDING_ERROR, ppDone);
 }
 
 // The device was unplugged. CDwcHcd has already disabled all channels and
@@ -945,9 +1164,8 @@ CPipeAbs * CreateControlPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescr
                IN const UCHAR bHubAddress, IN const UCHAR bHubPort, const PVOID ttContext,
                IN CHcd * const pChcd)
 {
-    UNREFERENCED_PARAMETER(ttContext);
     return new CDwcPipe(lpEndpointDescriptor, fIsLowSpeed, fIsHighSpeed, bDeviceAddress,
-                        bHubAddress, bHubPort, (CDwcHcd *)pChcd);
+                        bHubAddress, bHubPort, ttContext, (CDwcHcd *)pChcd);
 }
 
 CPipeAbs * CreateBulkPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
@@ -956,9 +1174,8 @@ CPipeAbs * CreateBulkPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescript
                IN const UCHAR bHubAddress, IN const UCHAR bHubPort, const PVOID ttContext,
                IN CHcd * const pChcd)
 {
-    UNREFERENCED_PARAMETER(ttContext);
     return new CDwcPipe(lpEndpointDescriptor, fIsLowSpeed, fIsHighSpeed, bDeviceAddress,
-                        bHubAddress, bHubPort, (CDwcHcd *)pChcd);
+                        bHubAddress, bHubPort, ttContext, (CDwcHcd *)pChcd);
 }
 
 CPipeAbs * CreateInterruptPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
@@ -967,9 +1184,8 @@ CPipeAbs * CreateInterruptPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDes
                IN const UCHAR bHubAddress, IN const UCHAR bHubPort, const PVOID ttContext,
                IN CHcd * const pChcd)
 {
-    UNREFERENCED_PARAMETER(ttContext);
     return new CDwcPipe(lpEndpointDescriptor, fIsLowSpeed, fIsHighSpeed, bDeviceAddress,
-                        bHubAddress, bHubPort, (CDwcHcd *)pChcd);
+                        bHubAddress, bHubPort, ttContext, (CDwcHcd *)pChcd);
 }
 
 CPipeAbs * CreateIsochronousPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,

@@ -14,6 +14,7 @@
 #include <hcdddsi.h>
 #include "cdwchcd.h"
 #include "cpipe.h"
+#include "dwctt.h"
 
 #define DWCMSG(x)   RETAILMSG(1, x)
 
@@ -274,22 +275,22 @@ DWORD CDwcHcd::GetCapability()
     return m_dwCapability;
 }
 
-// The library asks for a transaction translator whenever a full or low
-// speed device is attached to a high speed hub, including this root hub.
-// The root port needs none. Pipes behind a real high speed hub are refused
-// in CDwcPipe::OpenPipe until split transactions are implemented.
+// The library calls AddedTt once for each full/low speed device attached
+// behind a high speed hub, with that hub's address and the downstream port.
+// We allocate one transaction-translator object per (hub, port) and return
+// it as the opaque ttContext; the library passes it to the pipe factories
+// (so a pipe knows it must use split transactions) and back to DeleteTt.
 PVOID CDwcHcd::AddedTt(UCHAR uHubAddress, UCHAR uPort)
 {
-    UNREFERENCED_PARAMETER(uHubAddress);
-    UNREFERENCED_PARAMETER(uPort);
-    return (PVOID)1;
+    return (PVOID) new CDwcTt(uHubAddress, uPort);
 }
 
 BOOL CDwcHcd::DeleteTt(UCHAR uHubAddress, UCHAR uPort, PVOID ttContext)
 {
     UNREFERENCED_PARAMETER(uHubAddress);
     UNREFERENCED_PARAMETER(uPort);
-    UNREFERENCED_PARAMETER(ttContext);
+    if (ttContext != NULL)
+        delete (CDwcTt *)ttContext;
     return TRUE;
 }
 

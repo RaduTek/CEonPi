@@ -169,6 +169,20 @@
 #define HCCHAR_CHENA            DWC_BIT(31)
 
 #define HCSPLT(n)               (0x504 + 0x20 * (n))
+// Split-transaction control for a full/low speed device behind a high speed
+// hub's transaction translator (TT). XACTPOS encoding is not numeric order.
+#define HCSPLT_SPLTENA          DWC_BIT(31)
+#define HCSPLT_COMPSPLT         DWC_BIT(16)     // 0 = start-split, 1 = complete-split
+#define HCSPLT_XACTPOS_SHIFT    14
+#define HCSPLT_XACTPOS_MASK     (0x3UL << 14)
+#define HCSPLT_XACTPOS_MID      0
+#define HCSPLT_XACTPOS_END      1
+#define HCSPLT_XACTPOS_BEGIN    2
+#define HCSPLT_XACTPOS_ALL      3               // control/bulk/interrupt use ALL
+#define HCSPLT_HUBADDR_SHIFT    7
+#define HCSPLT_HUBADDR_MASK     (0x7FUL << 7)   // TT hub device address
+#define HCSPLT_PRTADDR_SHIFT    0
+#define HCSPLT_PRTADDR_MASK     (0x7FUL << 0)   // hub port the device hangs off
 
 #define HCINT(n)                (0x508 + 0x20 * (n))
 #define HCINTMSK(n)             (0x50C + 0x20 * (n))

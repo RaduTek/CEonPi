@@ -5,9 +5,10 @@
 // keeps a FIFO queue of transfers and runs the transfer at the head of the
 // queue on one host channel, one attempt at a time.
 //
-// Milestone 3 implemented control pipes. Milestone 4 adds bulk and
-// interrupt pipes: bulk reuses the data-stage machinery, interrupt adds a
-// start-of-frame scheduler so each poll happens one interval apart.
+// Control pipes, then bulk and interrupt pipes (interrupt adds a
+// start-of-frame scheduler so each poll happens one interval apart), and
+// control/bulk split transactions for a full/low speed device behind a high
+// speed hub's transaction translator (m_fDoSplit / m_pTt).
 //
 #ifndef __CPIPE_H__
 #define __CPIPE_H__
@@ -18,6 +19,7 @@
 #include "dwccore.h"
 
 class CDwcHcd;
+class CDwcTt;
 
 // Stages of a transfer. Non-control transfers only use the data stage.
 #define DWC_STAGE_SETUP         0
@@ -31,6 +33,7 @@ class CDwcHcd;
 
 #define DWC_MAX_ERRORS          3       // transaction errors before giving up
 #define DWC_ABORT_WAIT_MS       200     // wait for a channel to halt on abort
+#define DWC_MAX_CSPLIT_NYET     8       // complete-split NYET retries before restart
 
 typedef struct _DWC_TRANSFER
 {
@@ -64,6 +67,11 @@ typedef struct _DWC_TRANSFER
     BOOL    fAborting;          // AbortTransfer is waiting for the channel
     BOOL    fBusError;          // the core reported an AHB (DMA) error
 
+    // Split transaction state (full/low speed device behind a high speed hub)
+    BOOL    fCompleteSplit;     // FALSE = doing start-split, TRUE = complete-split
+    DWORD   dwNakCount;         // consecutive NAKs (throttle)
+    DWORD   dwNyetCount;        // consecutive complete-split NYETs
+
     // Current attempt on the channel
     BOOL    fAttemptIn;
     DWORD   cbAttempt;
@@ -77,6 +85,7 @@ public:
              IN const BOOL fIsLowSpeed, IN const BOOL fIsHighSpeed,
              IN const UCHAR bDeviceAddress,
              IN const UCHAR bHubAddress, IN const UCHAR bHubPort,
+             IN const PVOID ttContext,
              IN CDwcHcd * const pHcd);
     virtual ~CDwcPipe();
 
@@ -125,6 +134,8 @@ public:
 
 private:
     void StartAttempt(void);
+    void OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
+                          DWORD dwNextPid, DWC_TRANSFER **ppDone);
     void ScheduleNextInterval(void);    // interrupt pipes: wait one interval
     void ClearFrameWait(void);          // drop a pending frame wait
     void ReleaseChannel(void);
@@ -139,9 +150,11 @@ private:
     const UCHAR     m_bEpType;          // USB_ENDPOINT_TYPE_xxx
     const BOOL      m_fLowSpeed;
     const BOOL      m_fHighSpeed;
-    const UCHAR     m_bHubAddress;
-    const UCHAR     m_bHubPort;
+    const UCHAR     m_bHubAddress;      // TT hub address (nearest high speed hub)
+    const UCHAR     m_bHubPort;         // port on that hub
     const UCHAR     m_bInterval;        // endpoint bInterval (interrupt pipes)
+    const BOOL      m_fDoSplit;         // device is behind a TT; use split transactions
+    CDwcTt * const  m_pTt;              // the transaction translator (ttContext), or NULL
     USHORT          m_wMaxPacket;
     DWORD           m_dwInterval;       // poll interval in HFNUM units
 
