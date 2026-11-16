@@ -88,14 +88,30 @@ IF BSP_NOUSB !
 ENDIF BSP_NOUSB !
 ; @CESYSGEN ENDIF CE_MODULES_USBD
 
-; SD host controller driver (src\drivers\sdhcbcm). M0 probe: SDP_Init dumps the
-; Arasan eMMC + GPIO state through KITL at load and then stays resident.
-; Set BSP_NOSD=1 to leave it out. The real SD host PDD will replace this.
+; SD host controller driver (src\drivers\sdhcbcm): the BCM2835 PDD over the CE
+; standard SD host MDD. Set BSP_NOSD=1 to leave it out.
 IF BSP_NOSD !
 [HKEY_LOCAL_MACHINE\Drivers\BuiltIn\SDHCBcm]
-   "Prefix"="SDP"
+   "Prefix"="SHC"
    "Dll"="sdhcbcm.dll"
-   "Order"=dword:32
+   "Order"=dword:21
+   ; The MDD looks up this exported factory to build the BCM2835 controller.
+   "ObjectCreationProc"="CreateSDHCBcmObject"
+   ; Arasan eMMC register window: 0x20300000, 256 bytes, on the Internal bus.
+   "MemBase"=dword:20300000
+   "MemLen"=dword:00000100
+   "InterfaceType"=dword:0
+   "BusNumber"=dword:0
+   ; Static SysIntr for GPU IRQ 62, wired in the OAL as SYSINTR_SDHC (= 18).
+   "SysIntr"=dword:12
+   ; The Arasan capabilities register reads 0, so give the MDD the
+   ; mailbox-reported EMMC base clock (200000000 = 0x0BEBC200) and a timeout
+   ; clock. BaseClockFrequency/TimeoutClockFrequency override the caps fields.
+   "BaseClockFrequency"=dword:0BEBC200
+   "TimeoutClockFrequency"=dword:0BEBC200
+   ; Bring the stack up in PIO first (M1). DMA (SDMA + the VideoCore bus-address
+   ; offset) is enabled in M2 by clearing this.
+   "DisableDMA"=dword:1
 ENDIF BSP_NOSD !
 
 ; Placeholder for Network driver

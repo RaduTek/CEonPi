@@ -30,8 +30,9 @@ extern "C" {
 //
 #define SYSINTR_UART0        (SYSINTR_FIRMWARE+0)
 #define SYSINTR_USBHOST      (SYSINTR_FIRMWARE+1)
+#define SYSINTR_SDHC         (SYSINTR_FIRMWARE+2)   // Arasan eMMC, GPU IRQ 62
 
-#define SYSINTR_ENDOFSTATIC  (SYSINTR_FIRMWARE+1)
+#define SYSINTR_ENDOFSTATIC  (SYSINTR_FIRMWARE+2)
 
 
 // Discovered in the Raspberry Pi forums...

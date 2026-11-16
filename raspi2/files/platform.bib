@@ -99,9 +99,9 @@ ENDIF BSP_USB_EHCI
 ENDIF BSP_NOUSB !
 ; @CESYSGEN ENDIF CE_MODULES_USBD
 
-; SD host controller driver (src\drivers\sdhcbcm). Currently the M0 probe,
-; which dumps the Arasan eMMC + GPIO state at load. Not gated on the SD stack
-; yet (links no MDD). Set BSP_NOSD=1 to leave it out.
+; SD host controller driver (src\drivers\sdhcbcm): BCM2835 PDD over the CE
+; standard SD host MDD. Requires the SD stack in the OS design (sdbus.dll,
+; sdmemory.dll). Set BSP_NOSD=1 to leave it out.
 IF BSP_NOSD !
     sdhcbcm.dll        $(_FLATRELEASEDIR)\sdhcbcm.dll                  NK     SHK
 ENDIF BSP_NOSD !

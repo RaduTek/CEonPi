@@ -1,17 +1,29 @@
 # BCM2835 SD host controller driver (src\drivers\sdhcbcm).
 #
-# Milestone M0 is a self-contained probe: it maps the Arasan eMMC and GPIO
-# blocks and dumps their state through KITL at load. It does NOT link the CE
-# SD host MDD (SDHCBase.lib) yet, so it builds with no SD catalog items.
-# Later milestones add that link and turn this into a real SD host PDD.
+# Thin PDD over the CE standard SD host controller MDD (SDHCBase.lib) plus the
+# SD card/bus helper libs. Building this REQUIRES the SD stack in the OS design
+# (SD Bus Driver + SD Memory + Standard SDHC Host Controller catalog items), so
+# that SDHCBase.lib / sdcardlib.lib / sdhclib.lib / sdbus.lib exist in the
+# public lib tree. Set BSP_NOSD=1 (and drop sdhcbcm from ..\dirs) to build
+# without the SD stack.
 
 TARGETNAME=sdhcbcm
 TARGETTYPE=DYNLINK
-DLLENTRY=_DllMainCRTStartup
+DLLENTRY=_DllEntryCRTStartup
+
+PREPROCESSDEFFILE=1
+NORELEASEDEFFILE=1
+
+INCLUDES=$(INCLUDES);$(_PUBLICROOT)\common\oak\drivers\sdcard\SDHCDrivers\SDIOStdHC\base
+
+SOURCELIBS=$(_COMMONOAKROOT)\lib\$(_CPUINDPATH)\SDHCBase.lib
+
+TARGETLIBS= \
+    $(_COREDLL) \
+    $(_CEDDK) \
+    $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdcardlib.lib \
+    $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdhclib.lib \
+    $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdbus.lib \
 
 SOURCES= \
     sdhcbcm.cpp
-
-TARGETLIBS= \
-    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \
-    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib
