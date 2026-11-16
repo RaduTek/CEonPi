@@ -24,9 +24,14 @@ INCLUDES=$(INCLUDES);$(_PUBLICROOT)\common\oak\drivers\sdcard\SDHCDrivers\SDIOSt
 # project's cesysgen\oak\lib where the lib does not exist.
 SOURCELIBS=$(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\SDHCBase.lib
 
+# coredll.lib / ceddk.lib via the explicit SDK path the dwchci driver uses:
+# the $(_COREDLL)/$(_CEDDK) macros from the public pci sources are not defined
+# in this BSP build, so everything resolved only against them came out
+# unresolved (NKDbgPrintfW, EnterCriticalSection, Reg*, KernelIoControl, the
+# ceddk bus/DMA helpers, ...).
 TARGETLIBS= \
-    $(_COREDLL) \
-    $(_CEDDK) \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \
     $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdcardlib.lib \
     $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdhclib.lib \
     $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdbus.lib \
