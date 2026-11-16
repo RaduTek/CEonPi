@@ -16,15 +16,17 @@ NORELEASEDEFFILE=1
 
 INCLUDES=$(INCLUDES);$(_PUBLICROOT)\common\oak\drivers\sdcard\SDHCDrivers\SDIOStdHC\base
 
-# SDHCBase.lib is a prebuilt public lib (public\common\oak\lib), NOT a project
-# cesysgen output, so link it as a TARGETLIBS prebuilt. (The shipped pci PDD
-# uses SOURCELIBS/$(_COMMONOAKROOT) because it builds inside the public tree;
-# in a BSP that path resolves to cesysgen\oak\lib, where the lib does not
-# exist, so build.exe fails with "don't know how to make SDHCBase.lib".)
+# SDHCBase.lib must be whole-archive linked (SOURCELIBS) so the SHC_* stream
+# entry points and DllEntry it defines are pulled in for the .def to export -
+# as TARGETLIBS the linker only keeps referenced objects and the exports come
+# out unresolved. It is a prebuilt PUBLIC lib, so give the public path: the
+# shipped pci PDD uses $(_COMMONOAKROOT), which in a BSP resolves to the
+# project's cesysgen\oak\lib where the lib does not exist.
+SOURCELIBS=$(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\SDHCBase.lib
+
 TARGETLIBS= \
     $(_COREDLL) \
     $(_CEDDK) \
-    $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\SDHCBase.lib \
     $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdcardlib.lib \
     $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdhclib.lib \
     $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\sdbus.lib \
