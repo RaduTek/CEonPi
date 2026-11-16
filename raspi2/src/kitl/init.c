@@ -148,7 +148,7 @@ BOOL OEMKitlInit(PKITLTRANSPORT pKitl)
 #ifndef USE_INTERRUPTS
 	Args.flags = OAL_KITL_FLAGS_POLL;
 #endif // not USE_INTERRUPTS
-	Args.baudRate = 115200;
+	Args.baudRate = 460800; // 115200; // Increase baud rate for faster boot
 	Args.dataBits = 8;
 	Args.stopBits = 1;
 	Args.parity = 0;
