@@ -22,6 +22,7 @@
 #include <windows.h>
 #include <nkintr.h>
 #include <ceddk.h>
+#include <image_cfg.h>     // PERIPHERAL_PA_BASE (bcm2835.h builds its addresses from it)
 #include "bcm2835.h"
 
 // Size of the register window we map for the probe (one 4K page is plenty;
