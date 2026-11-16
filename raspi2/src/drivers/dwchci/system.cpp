@@ -16,22 +16,14 @@
 #include <bsp_cfg.h>
 #include "dwclog.h"
 
-#ifdef DEBUG
-// The driver's debug zones. Errors and warnings are on; the verbose init and
-// info zones are off, so a normal boot is quiet. Editable at run time through
-// the kernel zone editor (DBGPARAM name "DWCHCI").
-DBGPARAM dpCurSettings =
-{
-    TEXT("DWCHCI"),
-    {
-        TEXT("Errors"), TEXT("Warnings"), TEXT("Init"), TEXT("Info"),
-        TEXT(""), TEXT(""), TEXT(""), TEXT(""),
-        TEXT(""), TEXT(""), TEXT(""), TEXT(""),
-        TEXT(""), TEXT(""), TEXT(""), TEXT("")
-    },
-    DWC_DBG_ZONES_INITIAL
-};
-#endif
+// NOTE: dpCurSettings is intentionally NOT defined here. hcd2lib's hcddrv.obj
+// (which implements the HCD_* entry points and is therefore always linked in)
+// already defines the DBGPARAM dpCurSettings. Defining it again in the PDD
+// gives LNK2005 "dpCurSettings already defined" once hcd2lib is built with
+// DEBUG (a Debug sysgen). The driver uses the MDD's dpCurSettings; our zone
+// bit numbers in dwclog.h (ERROR=0, WARN=1, INIT=2, INFO=3) still line up with
+// the standard CE zone layout, so DWCERR/DWCWARN/etc. behave as before. In a
+// retail build both definitions compile out and DEBUGREGISTER is a no-op.
 
 // DMA memory pool handed to hcd2lib's CPhysMem. All transfer data is
 // copied through this pool. It is allocated uncached and contiguous.
