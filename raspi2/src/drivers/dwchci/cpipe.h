@@ -165,6 +165,7 @@ private:
     BOOL            m_fWaitingChannel;  // head transfer waits for a free channel
     BOOL            m_fWaitingFrame;    // head transfer waits for its due frame
     DWORD           m_dwNextFrame;      // HFNUM value to start the next poll at
+    DWORD           m_dwLastPollFrame;  // HFNUM value when the last poll started
     UCHAR           m_bStartUframe;     // interrupt split: reserved start microframe
     BOOL            m_fTtReserved;      // interrupt split: TT bandwidth is reserved
     int             m_iChannel;         // channel in use, or -1

@@ -95,14 +95,8 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     m_iChannel = -1;
     m_dwNextPid = HCTSIZ_PID_DATA0;
     m_pHead = NULL;
+    m_dwLastPollFrame = 0;
     m_hAbortEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-
-    // Diagnostic (one line per pipe, enumeration only): what hcd2lib hands us,
-    // to see how a full/low speed device behind a full speed hub is classified.
-    DWCMSG((TEXT("DWCHCI: new pipe ep 0x%02x type %d addr %d ls %d hs %d hub %d port %d tt %d -> split %d\r\n"),
-            m_bEndpointAddress, m_bEpType, bDeviceAddress,
-            fIsLowSpeed, fIsHighSpeed, bHubAddress, bHubPort,
-            (ttContext != NULL) ? 1 : 0, m_fDoSplit ? 1 : 0));
 }
 
 CDwcPipe::~CDwcPipe()
@@ -372,7 +366,20 @@ HCD_REQUEST_STATUS CDwcPipe::IssueTransfer(
     if (m_pHead == NULL)
     {
         m_pHead = pTransfer;
-        StartAttempt();
+        // An interrupt endpoint is polled once per interval. If the client
+        // re-issues right after a report (a mouse in constant motion returns
+        // data on every poll), hold the next poll to the interval boundary
+        // instead of starting at once, so the device is not over-polled and
+        // its reports do not overrun the HID queue.
+        if (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT &&
+            !m_pHcd->Core()->FrameReached((m_dwLastPollFrame + m_dwInterval) & HFNUM_MAX_FRNUM))
+        {
+            ScheduleNextInterval();
+        }
+        else
+        {
+            StartAttempt();
+        }
     }
     else
     {
@@ -508,6 +515,12 @@ void CDwcPipe::StartAttempt(void)
     pTransfer->fAttemptIn = s.fIn;
     pTransfer->cbAttempt = s.dwBytes;
     pTransfer->dwAttemptPackets = s.dwPackets;
+
+    // Remember when each interrupt poll begins (its start-split, for a split
+    // pipe) so the pipe is not polled faster than its interval. Not the
+    // complete-split or a data continuation, which are part of the same poll.
+    if (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT && !pTransfer->fCompleteSplit)
+        m_dwLastPollFrame = m_pHcd->Core()->CurFrame();
 
     m_pHcd->Core()->ChannelStart((DWORD)m_iChannel, &s);
 }
