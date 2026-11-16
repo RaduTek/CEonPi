@@ -111,8 +111,15 @@ controller so keyboards, mice and USB Ethernet work.
   in `dwc2reg.h`; split fields in `DWC_CHANNEL_SETUP`/`ChannelStart`; `CDwcPipe::OnSplitInterrupt`
   SSPLIT/CSPLIT machine). HS mass storage behind a hub also works. Verified trap:
   `m_fDoSplit` must **not** key off `ttContext`, which hcd2lib leaves NULL during the addr-0
-  enumeration of a device behind a hub; it is `!fIsHighSpeed && bHubAddress != 0` (device is
-  full/low speed and behind a real external hub; root-port devices report hub 0). For split
+  enumeration of a device behind a hub; it is `!fIsHighSpeed && bHubAddress != 0 && root port is
+  HS`. The root-port-speed gate matters: a FS/LS device behind a **full speed** hub (e.g. a Dell
+  keyboard with a built-in FS hub) has **no TT** - the whole tree below a FS top-level hub is
+  full/low speed and the hub is a plain repeater. Splitting to it puts malformed SSPLIT/CSPLIT
+  tokens on the wire and the core disables the babbling FS root port (observed as a reset loop
+  when a LS mouse is plugged into such a hub). Splits apply only when the root port negotiated
+  HIGH speed, the only case where a HS hub's TT exists; otherwise the core drives the device
+  directly (low speed uses PRE preambles via HCCHAR.LSPDDEV), as for a device on the root port.
+  Root-port devices report hub 0. For split
   transactions the HCCHAR `MULTICNT` field is the error/retry count: 3 for interrupt/isoc, 1 for
   control/bulk (dwc2 `hcd.c:1239`), already in `ChannelStart`.
 - Interrupt splits (Step 3) tested on hardware: HID behind a hub delivers input (`split interrupt

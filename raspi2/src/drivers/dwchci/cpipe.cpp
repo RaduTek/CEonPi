@@ -37,16 +37,26 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     , m_bHubPort(bHubPort)
     , m_bInterval(lpEndpointDescriptor->bInterval)
     // Split transactions are needed for a full/low speed device reached through
-    // a high speed hub's transaction translator. The deciding facts are the
-    // device speed and the hub it hangs off, both known here:
-    //   * full or low speed (not high speed), and
-    //   * behind a real external hub (bHubAddress != 0; a device on the root
-    //     port reports hub 0 and talks to the controller directly).
+    // a high speed hub's transaction translator. Three facts must all hold:
+    //   * the device is full or low speed (not high speed), and
+    //   * it is behind a real external hub (bHubAddress != 0; a device on the
+    //     root port reports hub 0 and talks to the controller directly), and
+    //   * the root port is running at HIGH speed, i.e. the device at the top of
+    //     the tree is a high speed hub that actually has a TT. If the root port
+    //     is full/low speed the whole tree below it is full/low speed: the top
+    //     hub is a plain full speed repeater with no TT, so there is nothing to
+    //     split to. The core then drives the device directly (low speed uses PRE
+    //     preamble packets automatically when HCCHAR.LSPDDEV is set), exactly as
+    //     for a full/low speed device on the root port. Firing SSPLIT/CSPLIT at
+    //     a full speed repeater hub puts malformed tokens on the wire and the
+    //     core disables the babbling root port.
     // ttContext is NOT used for this: hcd2lib leaves it NULL during the addr-0
     // enumeration of a device behind a hub (the TT is associated only after the
     // device is addressed), so gating on it would deadlock enumeration. The
     // split path uses m_bHubAddress/m_bHubPort directly, so a NULL TT is fine.
-    , m_fDoSplit(!fIsHighSpeed && bHubAddress != 0)
+    , m_fDoSplit(!fIsHighSpeed && bHubAddress != 0 &&
+                 (((pHcd->Core()->ReadPort() & HPRT0_SPD_MASK) >> HPRT0_SPD_SHIFT)
+                  == HPRT0_SPD_HIGH))
     , m_pTt((CDwcTt *)ttContext)
 {
     DWORD dwInterval;
