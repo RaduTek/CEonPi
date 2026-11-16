@@ -19,8 +19,7 @@
 #include "cdwchcd.h"
 #include "cpipe.h"
 #include "dwctt.h"
-
-#define DWCMSG(x)   RETAILMSG(1, x)
+#include "dwclog.h"
 
 CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
                    IN const BOOL fIsLowSpeed, IN const BOOL fIsHighSpeed,
@@ -139,7 +138,7 @@ HCD_REQUEST_STATUS CDwcPipe::OpenPipe(void)
             m_pHcd->UnlockHc();
             if (iStart < 0)
             {
-                DWCMSG((TEXT("DWCHCI: no TT bandwidth for interrupt pipe (hub %d port %d ep 0x%02x)\r\n"),
+                DWCWARN((TEXT("DWCHCI: no TT bandwidth for interrupt pipe (hub %d port %d ep 0x%02x)\r\n"),
                         m_bHubAddress, m_bHubPort, m_bEndpointAddress));
                 return requestFailed;
             }
@@ -370,7 +369,7 @@ HCD_REQUEST_STATUS CDwcPipe::IssueTransfer(
         m_fLoggedLsBlock = TRUE;
         m_pHcd->UnlockHc();
         if (fLogNow)
-            DWCMSG((TEXT("DWCHCI: low speed device behind a full speed hub is not ")
+            DWCWARN((TEXT("DWCHCI: low speed device behind a full speed hub is not ")
                     TEXT("supported by this controller; refusing transfer\r\n")));
         FreeTransfer(m_pHcd, pTransfer);
         __try
@@ -722,7 +721,7 @@ void CDwcPipe::OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone)
         if (dwHcint & HCINT_AHBERR)
         {
             // DMA failed. This points at a wrong bus address (DmaBusOffset).
-            DWCMSG((TEXT("DWCHCI: ***ERROR*** AHB (DMA) error on channel %d, HCDMA=0x%08x HCINT=0x%08x\r\n"),
+            DWCERR((TEXT("DWCHCI: ***ERROR*** AHB (DMA) error on channel %d, HCDMA=0x%08x HCINT=0x%08x\r\n"),
                     m_iChannel, pCore->Rd(HCDMA(m_iChannel)), dwHcint));
             pTransfer->fBusError = TRUE;
             if (pCore->ChannelRequestHalt((DWORD)m_iChannel))
@@ -811,7 +810,7 @@ void CDwcPipe::OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone)
                 if (!m_fLoggedData)
                 {
                     m_fLoggedData = TRUE;
-                    DWCMSG((TEXT("DWCHCI: %s pipe ep 0x%02x alive: first packet %d bytes\r\n"),
+                    DWCINFO((TEXT("DWCHCI: %s pipe ep 0x%02x alive: first packet %d bytes\r\n"),
                             (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT) ? TEXT("interrupt") : TEXT("bulk"),
                             m_bEndpointAddress, pTransfer->cbDone));
                 }
@@ -841,7 +840,7 @@ void CDwcPipe::OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone)
 
     if (dwHcint & HCINT_BBLERR)
     {
-        DWCMSG((TEXT("DWCHCI: babble error, ep 0x%02x stage %d\r\n"), m_bEndpointAddress, dwStage));
+        DWCWARN((TEXT("DWCHCI: babble error, ep 0x%02x stage %d\r\n"), m_bEndpointAddress, dwStage));
         Finish(pTransfer, USB_DATA_OVERRUN_ERROR, ppDone);
         return;
     }
@@ -902,7 +901,7 @@ void CDwcPipe::OnChannelInterrupt(DWORD dwHcint, DWC_TRANSFER **ppDone)
     }
 
     dwErr = (dwHcint & HCINT_DATATGLERR) ? USB_DATA_TOGGLE_MISMATCH_ERROR : USB_DEVICE_NOT_RESPONDING_ERROR;
-    DWCMSG((TEXT("DWCHCI: transfer failed, addr %d ep 0x%02x stage %d HCINT=0x%08x\r\n"),
+    DWCWARN((TEXT("DWCHCI: transfer failed, addr %d ep 0x%02x stage %d HCINT=0x%08x\r\n"),
             pTransfer->bAddress, m_bEndpointAddress, dwStage, dwHcint));
     Finish(pTransfer, dwErr, ppDone);
 }
@@ -958,7 +957,7 @@ void CDwcPipe::OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
             return;
         }
         dwErr = (dwHcint & HCINT_BBLERR) ? USB_DATA_OVERRUN_ERROR : USB_DEVICE_NOT_RESPONDING_ERROR;
-        DWCMSG((TEXT("DWCHCI: split failed, addr %d ep 0x%02x stage %d HCINT=0x%08x\r\n"),
+        DWCWARN((TEXT("DWCHCI: split failed, addr %d ep 0x%02x stage %d HCINT=0x%08x\r\n"),
                 pTransfer->bAddress, m_bEndpointAddress, dwStage, dwHcint));
         Finish(pTransfer, dwErr, ppDone);
         return;
@@ -992,7 +991,7 @@ void CDwcPipe::OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
             StartAttempt();
             return;
         }
-        DWCMSG((TEXT("DWCHCI: split SSPLIT no response, addr %d ep 0x%02x HCINT=0x%08x\r\n"),
+        DWCINFO((TEXT("DWCHCI: split SSPLIT no response, addr %d ep 0x%02x HCINT=0x%08x\r\n"),
                 pTransfer->bAddress, m_bEndpointAddress, dwHcint));
         Finish(pTransfer, USB_DEVICE_NOT_RESPONDING_ERROR, ppDone);
         return;
@@ -1048,7 +1047,7 @@ void CDwcPipe::OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
                 if (!m_fLoggedData)
                 {
                     m_fLoggedData = TRUE;
-                    DWCMSG((TEXT("DWCHCI: split %s pipe ep 0x%02x alive: first packet %d bytes\r\n"),
+                    DWCINFO((TEXT("DWCHCI: split %s pipe ep 0x%02x alive: first packet %d bytes\r\n"),
                             (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT) ? TEXT("interrupt") : TEXT("bulk"),
                             m_bEndpointAddress, pTransfer->cbDone));
                 }
@@ -1103,7 +1102,7 @@ void CDwcPipe::OnSplitInterrupt(DWORD dwHcint, DWORD dwStage, DWORD dwBytesLeft,
         StartAttempt();
         return;
     }
-    DWCMSG((TEXT("DWCHCI: split CSPLIT no response, addr %d ep 0x%02x HCINT=0x%08x\r\n"),
+    DWCINFO((TEXT("DWCHCI: split CSPLIT no response, addr %d ep 0x%02x HCINT=0x%08x\r\n"),
             pTransfer->bAddress, m_bEndpointAddress, dwHcint));
     Finish(pTransfer, USB_DEVICE_NOT_RESPONDING_ERROR, ppDone);
 }
@@ -1256,13 +1255,13 @@ void CDwcPipe::Complete(CDwcHcd *pHcd, DWC_TRANSFER *pTransfer)
         {
             if (pTransfer->cbDone >= 18)
             {
-                DWCMSG((TEXT("DWCHCI: device descriptor from addr %d: USB %x.%02x class %d maxpacket0 %d VID %04x PID %04x\r\n"),
+                DWCINFO((TEXT("DWCHCI: device descriptor from addr %d: USB %x.%02x class %d maxpacket0 %d VID %04x PID %04x\r\n"),
                         pTransfer->bAddress, p[3], p[2], p[4], p[7],
                         p[8] | (p[9] << 8), p[10] | (p[11] << 8)));
             }
             else if (pTransfer->cbDone >= 8)
             {
-                DWCMSG((TEXT("DWCHCI: device descriptor (first 8 bytes) from addr %d: %02x %02x %02x %02x %02x %02x %02x %02x\r\n"),
+                DWCINFO((TEXT("DWCHCI: device descriptor (first 8 bytes) from addr %d: %02x %02x %02x %02x %02x %02x %02x %02x\r\n"),
                         pTransfer->bAddress, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]));
             }
         }
@@ -1286,7 +1285,7 @@ void CDwcPipe::Complete(CDwcHcd *pHcd, DWC_TRANSFER *pTransfer)
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
-        DWCMSG((TEXT("DWCHCI: exception while completing a transfer\r\n")));
+        DWCERR((TEXT("DWCHCI: exception while completing a transfer\r\n")));
     }
 
     FreeTransfer(pHcd, pTransfer);
@@ -1350,7 +1349,7 @@ CPipeAbs * CreateIsochronousPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointD
     UNREFERENCED_PARAMETER(bHubPort);
     UNREFERENCED_PARAMETER(ttContext);
     UNREFERENCED_PARAMETER(pChcd);
-    DWCMSG((TEXT("DWCHCI: isochronous pipe (addr %d ep 0x%02x) requested: not supported\r\n"),
+    DWCWARN((TEXT("DWCHCI: isochronous pipe (addr %d ep 0x%02x) requested: not supported\r\n"),
             bDeviceAddress, lpEndpointDescriptor->bEndpointAddress));
     return NULL;
 }

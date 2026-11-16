@@ -15,8 +15,7 @@
 #include "cdwchcd.h"
 #include "cpipe.h"
 #include "dwctt.h"
-
-#define DWCMSG(x)   RETAILMSG(1, x)
+#include "dwclog.h"
 
 #define DWC_REG_DMA_BUS_OFFSET  TEXT("DmaBusOffset")
 #define DWC_DEFAULT_BUS_OFFSET  0x40000000
@@ -115,7 +114,7 @@ BOOL CDwcHcd::DeviceInitialize(void)
     USB_DEVICE_INFO deviceInfo;
     USB_HUB_DESCRIPTOR usbHubDescriptor;
 
-    DWCMSG((TEXT("DWCHCI: DeviceInitialize, SysIntr=%d DmaBusOffset=0x%08x\r\n"),
+    DWCINIT((TEXT("DWCHCI: DeviceInitialize, SysIntr=%d DmaBusOffset=0x%08x\r\n"),
             m_dwSysIntr, m_dwDmaBusOffset));
 
     m_pMem->ReInit();
@@ -123,13 +122,13 @@ BOOL CDwcHcd::DeviceInitialize(void)
     // Loads USBD and registers this host controller with it
     if (!CDeviceGlobal::Initialize(this))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** CDeviceGlobal::Initialize failed (is usbd.dll in the image?)\r\n")));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** CDeviceGlobal::Initialize failed (is usbd.dll in the image?)\r\n")));
         return FALSE;
     }
 
     if (!m_core.Map() || !m_core.DumpIdentity() || !m_core.HostInit())
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** controller initialisation failed\r\n")));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** controller initialisation failed\r\n")));
         return FALSE;
     }
     if (m_core.Channels() > DWC_MAX_CHANNELS)
@@ -142,7 +141,7 @@ BOOL CDwcHcd::DeviceInitialize(void)
 
     if (!InterruptInitialize(m_dwSysIntr, m_hIntrEvent, NULL, 0))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** InterruptInitialize(%d) failed, error %d\r\n"),
+        DWCERR((TEXT("DWCHCI: ***ERROR*** InterruptInitialize(%d) failed, error %d\r\n"),
                 m_dwSysIntr, GetLastError()));
         return FALSE;
     }
@@ -183,21 +182,21 @@ BOOL CDwcHcd::DeviceInitialize(void)
     SetRootHub(new CRootHub(deviceInfo, FALSE, TRUE, usbHubDescriptor, this));
     if (GetRootHub() == NULL)
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** cannot create the root hub object\r\n")));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** cannot create the root hub object\r\n")));
         return FALSE;
     }
 
     // Starts the library's hub thread, which calls GetPortStatus and friends
     if (FXN_DEV_STATE_OPERATIONAL != GetRootHub()->EnterOperationalState(NULL))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** root hub failed to start\r\n")));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** root hub failed to start\r\n")));
         return FALSE;
     }
 
     // A device that is already plugged in raises the port interrupt now
     m_core.EnableInterrupts();
 
-    DWCMSG((TEXT("DWCHCI: DeviceInitialize done (milestone 4: control, bulk and interrupt pipes)\r\n")));
+    DWCINIT((TEXT("DWCHCI: DeviceInitialize done (milestone 4: control, bulk and interrupt pipes)\r\n")));
     return TRUE;
 }
 
@@ -452,7 +451,7 @@ BOOL CDwcHcd::ResetAndEnablePort(IN const UCHAR port)
     }
     else
     {
-        DWCMSG((TEXT("DWCHCI: port did not enable after reset, HPRT0=0x%08x\r\n"), dwHprt));
+        DWCWARN((TEXT("DWCHCI: port did not enable after reset, HPRT0=0x%08x\r\n"), dwHprt));
     }
 
     LockHc();
@@ -602,7 +601,7 @@ void CDwcHcd::HandlePort(void)
         else if (!m_fInReset && !m_fDisableRequested)
         {
             // The core disabled the port by itself (babble, disconnect)
-            DWCMSG((TEXT("DWCHCI: root port disabled by core, HPRT0=0x%08x\r\n"), dwHprt));
+            DWCINFO((TEXT("DWCHCI: root port disabled by core, HPRT0=0x%08x\r\n"), dwHprt));
             m_dwPortChange |= DWC_PC_ENABLE;
             fSignal = TRUE;
         }
@@ -630,7 +629,7 @@ void CDwcHcd::HandleDisconnect(DWC_TRANSFER **ppDone)
     if (m_core.ReadPort() & HPRT0_CONNSTS)
         return;
 
-    DWCMSG((TEXT("DWCHCI: device disconnected\r\n")));
+    DWCINFO((TEXT("DWCHCI: device disconnected\r\n")));
 
     // Nothing will complete any more: stop the channels and fail everything
     dwStuck = m_core.DisableAllChannels();
@@ -649,11 +648,11 @@ void CDwcHcd::HandleDisconnect(DWC_TRANSFER **ppDone)
     // still attached is re-detected and enumerates normally.
     if (dwStuck > 0)
     {
-        DWCMSG((TEXT("DWCHCI: %d channel(s) would not halt; resetting the controller\r\n"), dwStuck));
+        DWCWARN((TEXT("DWCHCI: %d channel(s) would not halt; resetting the controller\r\n"), dwStuck));
         if (m_core.HostInit())
             m_core.EnableInterrupts();
         else
-            DWCMSG((TEXT("DWCHCI: ***ERROR*** controller re-init after disconnect failed\r\n")));
+            DWCERR((TEXT("DWCHCI: ***ERROR*** controller re-init after disconnect failed\r\n")));
         m_dwSofWaiters = 0;     // nothing is polling after the reset
     }
 
@@ -742,7 +741,7 @@ DWORD CDwcHcd::Ist(void)
         dwOther = dwPend & ~(GINTSTS_PRTINT | GINTSTS_DISCONNINT | GINTSTS_SOF | GINTSTS_HCHINT);
         if (dwOther)
         {
-            DWCMSG((TEXT("DWCHCI: unexpected interrupt bits 0x%08x\r\n"), dwOther));
+            DWCWARN((TEXT("DWCHCI: unexpected interrupt bits 0x%08x\r\n"), dwOther));
             m_core.Wr(GINTSTS, dwOther);
         }
         UnlockHc();

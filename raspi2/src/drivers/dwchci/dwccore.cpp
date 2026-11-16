@@ -9,8 +9,7 @@
 #include <windows.h>
 #include <ceddk.h>
 #include "dwccore.h"
-
-#define DWCMSG(x)   RETAILMSG(1, x)
+#include "dwclog.h"
 
 // Bounded wait for a channel to clear CHENA after a halt request. On a live
 // bus a halt takes microseconds; the cap only guards a channel that refuses
@@ -38,7 +37,7 @@ BOOL CDwcCore::Map(void)
     pa.QuadPart = DWC_PA_BASE;
     m_pRegs = (PUCHAR)MmMapIoSpace(pa, DWC_MAP_SIZE, FALSE);
 
-    DWCMSG((TEXT("DWCHCI: MmMapIoSpace(0x%08x, 0x%x) = 0x%08x\r\n"),
+    DWCINIT((TEXT("DWCHCI: MmMapIoSpace(0x%08x, 0x%x) = 0x%08x\r\n"),
             DWC_PA_BASE, DWC_MAP_SIZE, m_pRegs));
 
     return (m_pRegs != NULL);
@@ -64,56 +63,56 @@ BOOL CDwcCore::DumpIdentity(void)
     __try
     {
         dwId = Rd(GSNPSID);
-        DWCMSG((TEXT("DWCHCI: GSNPSID  = 0x%08x  GUID = 0x%08x\r\n"), dwId, Rd(GUID)));
+        DWCINIT((TEXT("DWCHCI: GSNPSID  = 0x%08x  GUID = 0x%08x\r\n"), dwId, Rd(GUID)));
 
         dwCfg2 = Rd(GHWCFG2);
         dwCfg3 = Rd(GHWCFG3);
         dwCfg4 = Rd(GHWCFG4);
-        DWCMSG((TEXT("DWCHCI: GHWCFG1  = 0x%08x\r\n"), Rd(GHWCFG1)));
-        DWCMSG((TEXT("DWCHCI: GHWCFG2  = 0x%08x\r\n"), dwCfg2));
-        DWCMSG((TEXT("DWCHCI: GHWCFG3  = 0x%08x\r\n"), dwCfg3));
-        DWCMSG((TEXT("DWCHCI: GHWCFG4  = 0x%08x\r\n"), dwCfg4));
+        DWCINIT((TEXT("DWCHCI: GHWCFG1  = 0x%08x\r\n"), Rd(GHWCFG1)));
+        DWCINIT((TEXT("DWCHCI: GHWCFG2  = 0x%08x\r\n"), dwCfg2));
+        DWCINIT((TEXT("DWCHCI: GHWCFG3  = 0x%08x\r\n"), dwCfg3));
+        DWCINIT((TEXT("DWCHCI: GHWCFG4  = 0x%08x\r\n"), dwCfg4));
 
         m_dwChannels = ((dwCfg2 & GHWCFG2_NUM_HOST_CHAN_MASK) >> GHWCFG2_NUM_HOST_CHAN_SHIFT) + 1;
 
-        DWCMSG((TEXT("DWCHCI:   opmode=%d arch=%d (2=internal DMA) hsphy=%d (1=UTMI) fsphy=%d\r\n"),
+        DWCINIT((TEXT("DWCHCI:   opmode=%d arch=%d (2=internal DMA) hsphy=%d (1=UTMI) fsphy=%d\r\n"),
                 dwCfg2 & GHWCFG2_OP_MODE_MASK,
                 (dwCfg2 & GHWCFG2_ARCH_MASK) >> GHWCFG2_ARCH_SHIFT,
                 (dwCfg2 & GHWCFG2_HS_PHY_MASK) >> GHWCFG2_HS_PHY_SHIFT,
                 (dwCfg2 & GHWCFG2_FS_PHY_MASK) >> GHWCFG2_FS_PHY_SHIFT));
-        DWCMSG((TEXT("DWCHCI:   channels=%d dynfifo=%d periodic=%d\r\n"),
+        DWCINIT((TEXT("DWCHCI:   channels=%d dynfifo=%d periodic=%d\r\n"),
                 m_dwChannels,
                 (dwCfg2 & GHWCFG2_DYNAMIC_FIFO) ? 1 : 0,
                 (dwCfg2 & GHWCFG2_PERIO_EP) ? 1 : 0));
-        DWCMSG((TEXT("DWCHCI:   fifodepth=%d xfersizew=%d pktsizew=%d\r\n"),
+        DWCINIT((TEXT("DWCHCI:   fifodepth=%d xfersizew=%d pktsizew=%d\r\n"),
                 dwCfg3 >> GHWCFG3_DFIFO_DEPTH_SHIFT,
                 dwCfg3 & GHWCFG3_XFER_SIZE_W_MASK,
                 (dwCfg3 & GHWCFG3_PKT_SIZE_W_MASK) >> GHWCFG3_PKT_SIZE_W_SHIFT));
-        DWCMSG((TEXT("DWCHCI:   utmiwidth=%d (0=8bit 1=16bit 2=either) descdma=%d dedfifo=%d\r\n"),
+        DWCINIT((TEXT("DWCHCI:   utmiwidth=%d (0=8bit 1=16bit 2=either) descdma=%d dedfifo=%d\r\n"),
                 (dwCfg4 & GHWCFG4_UTMI_WIDTH_MASK) >> GHWCFG4_UTMI_WIDTH_SHIFT,
                 (dwCfg4 & GHWCFG4_DESC_DMA) ? 1 : 0,
                 (dwCfg4 & GHWCFG4_DED_FIFO_EN) ? 1 : 0));
 
-        DWCMSG((TEXT("DWCHCI: GOTGCTL  = 0x%08x\r\n"), Rd(GOTGCTL)));
-        DWCMSG((TEXT("DWCHCI: GAHBCFG  = 0x%08x\r\n"), Rd(GAHBCFG)));
-        DWCMSG((TEXT("DWCHCI: GUSBCFG  = 0x%08x\r\n"), Rd(GUSBCFG)));
-        DWCMSG((TEXT("DWCHCI: GRSTCTL  = 0x%08x\r\n"), Rd(GRSTCTL)));
-        DWCMSG((TEXT("DWCHCI: GINTSTS  = 0x%08x (bit0: 1=host mode)\r\n"), Rd(GINTSTS)));
-        DWCMSG((TEXT("DWCHCI: GINTMSK  = 0x%08x\r\n"), Rd(GINTMSK)));
-        DWCMSG((TEXT("DWCHCI: GRXFSIZ  = 0x%08x\r\n"), Rd(GRXFSIZ)));
-        DWCMSG((TEXT("DWCHCI: GNPTXFSIZ= 0x%08x\r\n"), Rd(GNPTXFSIZ)));
-        DWCMSG((TEXT("DWCHCI: HPTXFSIZ = 0x%08x\r\n"), Rd(HPTXFSIZ)));
-        DWCMSG((TEXT("DWCHCI: HCFG     = 0x%08x\r\n"), Rd(HCFG)));
-        DWCMSG((TEXT("DWCHCI: HFIR     = 0x%08x\r\n"), Rd(HFIR)));
+        DWCINIT((TEXT("DWCHCI: GOTGCTL  = 0x%08x\r\n"), Rd(GOTGCTL)));
+        DWCINIT((TEXT("DWCHCI: GAHBCFG  = 0x%08x\r\n"), Rd(GAHBCFG)));
+        DWCINIT((TEXT("DWCHCI: GUSBCFG  = 0x%08x\r\n"), Rd(GUSBCFG)));
+        DWCINIT((TEXT("DWCHCI: GRSTCTL  = 0x%08x\r\n"), Rd(GRSTCTL)));
+        DWCINIT((TEXT("DWCHCI: GINTSTS  = 0x%08x (bit0: 1=host mode)\r\n"), Rd(GINTSTS)));
+        DWCINIT((TEXT("DWCHCI: GINTMSK  = 0x%08x\r\n"), Rd(GINTMSK)));
+        DWCINIT((TEXT("DWCHCI: GRXFSIZ  = 0x%08x\r\n"), Rd(GRXFSIZ)));
+        DWCINIT((TEXT("DWCHCI: GNPTXFSIZ= 0x%08x\r\n"), Rd(GNPTXFSIZ)));
+        DWCINIT((TEXT("DWCHCI: HPTXFSIZ = 0x%08x\r\n"), Rd(HPTXFSIZ)));
+        DWCINIT((TEXT("DWCHCI: HCFG     = 0x%08x\r\n"), Rd(HCFG)));
+        DWCINIT((TEXT("DWCHCI: HFIR     = 0x%08x\r\n"), Rd(HFIR)));
 
         dwPrt = Rd(HPRT0);
-        DWCMSG((TEXT("DWCHCI: HPRT0    = 0x%08x (conn=%d ena=%d pwr=%d spd=%d)\r\n"),
+        DWCINIT((TEXT("DWCHCI: HPRT0    = 0x%08x (conn=%d ena=%d pwr=%d spd=%d)\r\n"),
                 dwPrt,
                 (dwPrt & HPRT0_CONNSTS) ? 1 : 0,
                 (dwPrt & HPRT0_ENA) ? 1 : 0,
                 (dwPrt & HPRT0_PWR) ? 1 : 0,
                 (dwPrt & HPRT0_SPD_MASK) >> HPRT0_SPD_SHIFT));
-        DWCMSG((TEXT("DWCHCI: PCGCTL   = 0x%08x\r\n"), Rd(PCGCTL)));
+        DWCINIT((TEXT("DWCHCI: PCGCTL   = 0x%08x\r\n"), Rd(PCGCTL)));
 
         if ((dwId & GSNPSID_ID_MASK) == GSNPSID_ID_OTG2)
         {
@@ -121,12 +120,12 @@ BOOL CDwcCore::DumpIdentity(void)
         }
         else
         {
-            DWCMSG((TEXT("DWCHCI: ***ERROR*** GSNPSID is not 0x4F542xxx. Wrong mapping or USB not powered.\r\n")));
+            DWCERR((TEXT("DWCHCI: ***ERROR*** GSNPSID is not 0x4F542xxx. Wrong mapping or USB not powered.\r\n")));
         }
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** exception 0x%08x while reading registers\r\n"),
+        DWCERR((TEXT("DWCHCI: ***ERROR*** exception 0x%08x while reading registers\r\n"),
                 GetExceptionCode()));
         fOk = FALSE;
     }
@@ -163,7 +162,7 @@ BOOL CDwcCore::CoreReset(void)
 {
     if (!WaitBits(GRSTCTL, GRSTCTL_AHBIDLE, GRSTCTL_AHBIDLE, 100))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** AHB not idle before reset, GRSTCTL=0x%08x\r\n"), Rd(GRSTCTL)));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** AHB not idle before reset, GRSTCTL=0x%08x\r\n"), Rd(GRSTCTL)));
         return FALSE;
     }
 
@@ -171,12 +170,12 @@ BOOL CDwcCore::CoreReset(void)
 
     if (!WaitBits(GRSTCTL, GRSTCTL_CSFTRST, 0, 100))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** core reset did not finish, GRSTCTL=0x%08x\r\n"), Rd(GRSTCTL)));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** core reset did not finish, GRSTCTL=0x%08x\r\n"), Rd(GRSTCTL)));
         return FALSE;
     }
     if (!WaitBits(GRSTCTL, GRSTCTL_AHBIDLE, GRSTCTL_AHBIDLE, 100))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** AHB not idle after reset, GRSTCTL=0x%08x\r\n"), Rd(GRSTCTL)));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** AHB not idle after reset, GRSTCTL=0x%08x\r\n"), Rd(GRSTCTL)));
         return FALSE;
     }
     return TRUE;
@@ -193,7 +192,7 @@ BOOL CDwcCore::ForceHostMode(void)
 
     if (!WaitBits(GINTSTS, GINTSTS_CURMODE_HOST, GINTSTS_CURMODE_HOST, 200))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** core did not enter host mode, GINTSTS=0x%08x\r\n"), Rd(GINTSTS)));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** core did not enter host mode, GINTSTS=0x%08x\r\n"), Rd(GINTSTS)));
         return FALSE;
     }
     return TRUE;
@@ -205,7 +204,7 @@ BOOL CDwcCore::FlushTxFifos(void)
     Wr(GRSTCTL, GRSTCTL_TXFFLSH | GRSTCTL_TXFNUM_ALL);
     if (!WaitBits(GRSTCTL, GRSTCTL_TXFFLSH, 0, 100))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** TX FIFO flush timeout\r\n")));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** TX FIFO flush timeout\r\n")));
         return FALSE;
     }
     return TRUE;
@@ -217,7 +216,7 @@ BOOL CDwcCore::FlushRxFifo(void)
     Wr(GRSTCTL, GRSTCTL_RXFFLSH);
     if (!WaitBits(GRSTCTL, GRSTCTL_RXFFLSH, 0, 100))
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** RX FIFO flush timeout\r\n")));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** RX FIFO flush timeout\r\n")));
         return FALSE;
     }
     return TRUE;
@@ -238,7 +237,7 @@ void CDwcCore::HaltAllChannels(void)
             Wr(HCCHAR(i), dwChar);
             if (!WaitBits(HCCHAR(i), HCCHAR_CHENA, 0, 50))
             {
-                DWCMSG((TEXT("DWCHCI: channel %d did not halt, HCCHAR=0x%08x\r\n"), i, Rd(HCCHAR(i))));
+                DWCWARN((TEXT("DWCHCI: channel %d did not halt, HCCHAR=0x%08x\r\n"), i, Rd(HCCHAR(i))));
             }
         }
         Wr(HCINTMSK(i), 0);
@@ -274,7 +273,7 @@ BOOL CDwcCore::HostInit(void)
     dwNew = dwCfg & ~(GUSBCFG_ULPI_UTMI_SEL | GUSBCFG_PHYIF16);
     if (dwNew != dwCfg)
     {
-        DWCMSG((TEXT("DWCHCI: PHY select changed, GUSBCFG 0x%08x -> 0x%08x, resetting again\r\n"), dwCfg, dwNew));
+        DWCINIT((TEXT("DWCHCI: PHY select changed, GUSBCFG 0x%08x -> 0x%08x, resetting again\r\n"), dwCfg, dwNew));
         Wr(GUSBCFG, dwNew);
         if (!CoreReset())
             return FALSE;
@@ -319,7 +318,7 @@ BOOL CDwcCore::HostInit(void)
     dwP = DWC_PTX_FIFO_WORDS;
     if ((dwRx + dwNp + dwP) > dwDepth)
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** FIFOs (%d words) do not fit in %d\r\n"), dwRx + dwNp + dwP, dwDepth));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** FIFOs (%d words) do not fit in %d\r\n"), dwRx + dwNp + dwP, dwDepth));
         return FALSE;
     }
     Wr(GRXFSIZ, dwRx);
@@ -346,11 +345,11 @@ BOOL CDwcCore::HostInit(void)
     Wr(HAINTMSK, 0);
     Wr(GINTMSK, GINTSTS_PRTINT | GINTSTS_DISCONNINT | GINTSTS_HCHINT);
 
-    DWCMSG((TEXT("DWCHCI: host init done. GUSBCFG=0x%08x GAHBCFG=0x%08x HCFG=0x%08x\r\n"),
+    DWCINIT((TEXT("DWCHCI: host init done. GUSBCFG=0x%08x GAHBCFG=0x%08x HCFG=0x%08x\r\n"),
             Rd(GUSBCFG), Rd(GAHBCFG), Rd(HCFG)));
-    DWCMSG((TEXT("DWCHCI:   GRXFSIZ=0x%08x GNPTXFSIZ=0x%08x HPTXFSIZ=0x%08x\r\n"),
+    DWCINIT((TEXT("DWCHCI:   GRXFSIZ=0x%08x GNPTXFSIZ=0x%08x HPTXFSIZ=0x%08x\r\n"),
             Rd(GRXFSIZ), Rd(GNPTXFSIZ), Rd(HPTXFSIZ)));
-    DWCMSG((TEXT("DWCHCI:   GINTSTS=0x%08x GOTGCTL=0x%08x HPRT0=0x%08x\r\n"),
+    DWCINIT((TEXT("DWCHCI:   GINTSTS=0x%08x GOTGCTL=0x%08x HPRT0=0x%08x\r\n"),
             Rd(GINTSTS), Rd(GOTGCTL), Rd(HPRT0)));
     return TRUE;
 }
@@ -545,7 +544,7 @@ void CDwcCore::ChannelForceOff(DWORD dwCh)
         dwChar |= HCCHAR_CHENA | HCCHAR_CHDIS;
         Wr(HCCHAR(dwCh), dwChar);
         if (!WaitBits(HCCHAR(dwCh), HCCHAR_CHENA, 0, DWC_CH_HALT_MS))
-            DWCMSG((TEXT("DWCHCI: ChannelForceOff: channel %d would not halt\r\n"), dwCh));
+            DWCWARN((TEXT("DWCHCI: ChannelForceOff: channel %d would not halt\r\n"), dwCh));
     }
     ChannelRelease(dwCh);
 }
@@ -597,7 +596,7 @@ DWORD CDwcCore::DisableAllChannels(void)
     // One line on disconnect (rare), so the log shows how many channels were
     // still busy and whether any refused to halt.
     if (dwActive != 0)
-        DWCMSG((TEXT("DWCHCI: disconnect halted %d active channel(s), %d stuck\r\n"),
+        DWCINFO((TEXT("DWCHCI: disconnect halted %d active channel(s), %d stuck\r\n"),
                 dwActive, dwStuck));
 
     return dwStuck;

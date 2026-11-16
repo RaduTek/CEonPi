@@ -14,8 +14,24 @@
 #include <ceddk.h>
 #include <hcdddsi.h>
 #include <bsp_cfg.h>
+#include "dwclog.h"
 
-#define DWCMSG(x)   RETAILMSG(1, x)
+#ifdef DEBUG
+// The driver's debug zones. Errors and warnings are on; the verbose init and
+// info zones are off, so a normal boot is quiet. Editable at run time through
+// the kernel zone editor (DBGPARAM name "DWCHCI").
+DBGPARAM dpCurSettings =
+{
+    TEXT("DWCHCI"),
+    {
+        TEXT("Errors"), TEXT("Warnings"), TEXT("Init"), TEXT("Info"),
+        TEXT(""), TEXT(""), TEXT(""), TEXT(""),
+        TEXT(""), TEXT(""), TEXT(""), TEXT(""),
+        TEXT(""), TEXT(""), TEXT(""), TEXT("")
+    },
+    DWC_DBG_ZONES_INITIAL
+};
+#endif
 
 // DMA memory pool handed to hcd2lib's CPhysMem. All transfer data is
 // copied through this pool. It is allocated uncached and contiguous.
@@ -31,9 +47,9 @@ typedef struct _DWC_PDD
 
 extern "C" BOOL HcdPdd_DllMain(HANDLE hinstDLL, DWORD dwReason, LPVOID lpvReserved)
 {
-    UNREFERENCED_PARAMETER(hinstDLL);
-    UNREFERENCED_PARAMETER(dwReason);
     UNREFERENCED_PARAMETER(lpvReserved);
+    if (dwReason == DLL_PROCESS_ATTACH)
+        DEBUGREGISTER((HMODULE)hinstDLL);
     return TRUE;
 }
 
@@ -43,7 +59,7 @@ extern "C" DWORD HcdPdd_Init(DWORD dwContext)
 {
     DWC_PDD *pPdd;
 
-    DWCMSG((TEXT("DWCHCI: HcdPdd_Init key=%s\r\n"), (LPCWSTR)dwContext));
+    DWCINIT((TEXT("DWCHCI: HcdPdd_Init key=%s\r\n"), (LPCWSTR)dwContext));
 
     pPdd = (DWC_PDD *)LocalAlloc(LPTR, sizeof(DWC_PDD));
     if (pPdd == NULL)
@@ -53,7 +69,7 @@ extern "C" DWORD HcdPdd_Init(DWORD dwContext)
     pPdd->lpvMemoryObject = HcdMdd_CreateMemoryObject(DWC_PHYSMEM_TOTAL, DWC_PHYSMEM_HIGHPRI, NULL, NULL);
     if (pPdd->lpvMemoryObject == NULL)
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** cannot create the DMA memory pool\r\n")));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** cannot create the DMA memory pool\r\n")));
         LocalFree(pPdd);
         return 0;
     }
@@ -63,13 +79,13 @@ extern "C" DWORD HcdPdd_Init(DWORD dwContext)
                                                 NULL, SYSINTR_USBHOST);
     if (pPdd->lpvHcdObject == NULL)
     {
-        DWCMSG((TEXT("DWCHCI: ***ERROR*** host controller object not created, driver not loaded\r\n")));
+        DWCERR((TEXT("DWCHCI: ***ERROR*** host controller object not created, driver not loaded\r\n")));
         HcdMdd_DestroyMemoryObject(pPdd->lpvMemoryObject);
         LocalFree(pPdd);
         return 0;
     }
 
-    DWCMSG((TEXT("DWCHCI: HcdPdd_Init done\r\n")));
+    DWCINIT((TEXT("DWCHCI: HcdPdd_Init done\r\n")));
     return (DWORD)pPdd;
 }
 
