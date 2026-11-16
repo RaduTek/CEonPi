@@ -6,8 +6,9 @@
 // All four source files share these macros. Errors and warnings print by
 // default; the verbose init/register-dump and per-event info zones are off,
 // so a normal boot does not pay KITL's ~30 ms per line. Turn a zone on with
-// the kernel debug-zone editor (the DBGPARAM is named "DWCHCI"), or change
-// DWC_DBG_ZONES_INITIAL in system.cpp.
+// the kernel debug-zone editor. The DBGPARAM dpCurSettings is owned by hcd2lib
+// (the PDD must not redefine it - see the note in system.cpp), so the zone
+// names shown in the editor are hcd2lib's; the bit numbers below still match.
 //
 // In a retail (ship) build DEBUGMSG compiles to nothing, so these cost
 // nothing and reference no globals.
@@ -31,7 +32,7 @@
 #define DWCINFO(x)      DEBUGMSG(DEBUGZONE(ZONEID_INFO), x)
 
 #ifdef DEBUG
-extern DBGPARAM dpCurSettings;  // defined in system.cpp
+extern DBGPARAM dpCurSettings;  // provided by hcd2lib (hcddrv.obj); see system.cpp
 #endif
 
 #endif // __DWCLOG_H__
