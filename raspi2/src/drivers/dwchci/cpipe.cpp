@@ -97,6 +97,7 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     m_fOpen = FALSE;
     m_fHalted = FALSE;
     m_fLoggedData = FALSE;
+    m_fLoggedLsBlock = FALSE;
     m_fWaitingChannel = FALSE;
     m_fWaitingFrame = FALSE;
     m_dwNextFrame = 0;
@@ -354,6 +355,35 @@ HCD_REQUEST_STATUS CDwcPipe::IssueTransfer(
     }
 
     m_pHcd->LockHc();
+
+    // A low speed device behind a full speed hub cannot be reached on this
+    // controller (dedicated full speed PHY + UTMI+ high speed PHY: the core
+    // cannot emit low speed PRE packets while the root port runs at full
+    // speed - see CDwcCore::LowSpeedUnreachable). Fail the transfer cleanly,
+    // exactly as dwc2 does, rather than program a channel that would put a
+    // low speed token on the full speed bus: that babbles and the core
+    // disables the root port, which jams the hub and every device behind it.
+    // The low speed device simply will not work here; the rest stays up.
+    if (m_fLowSpeed && m_pHcd->Core()->LowSpeedUnreachable())
+    {
+        BOOL fLogNow = !m_fLoggedLsBlock;
+        m_fLoggedLsBlock = TRUE;
+        m_pHcd->UnlockHc();
+        if (fLogNow)
+            DWCMSG((TEXT("DWCHCI: low speed device behind a full speed hub is not ")
+                    TEXT("supported by this controller; refusing transfer\r\n")));
+        FreeTransfer(m_pHcd, pTransfer);
+        __try
+        {
+            *lpdwError = USB_DEVICE_NOT_RESPONDING_ERROR;
+            *lpfComplete = TRUE;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return requestFailed;
+    }
 
     // A closed pipe cannot accept transfers. With the port down, a control or
     // bulk transfer cannot make progress either, so fail it. An interrupt

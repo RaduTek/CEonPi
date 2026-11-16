@@ -86,6 +86,24 @@ public:
 
     // Root port
     DWORD ReadPort(void) const      { return Rd(HPRT0); }
+
+    // This core configuration - a dedicated full speed PHY alongside a UTMI+
+    // high speed PHY, which is what the BCM2835 has - cannot generate the
+    // low speed PRE (preamble) packets needed to reach a low speed device
+    // through a full speed hub while the root port is running at full speed.
+    // Forcing a low speed token onto the full speed bus makes the device
+    // babble and the core disables the root port. dwc2 refuses such a
+    // transfer (hcd.c dwc2_hcd_urb_enqueue returns -ENODEV); this reports the
+    // same condition so a low speed transfer can be failed cleanly instead.
+    BOOL LowSpeedUnreachable(void) const
+    {
+        DWORD dwCfg2 = Rd(GHWCFG2);
+        if (((dwCfg2 & GHWCFG2_FS_PHY_MASK) >> GHWCFG2_FS_PHY_SHIFT) != GHWCFG2_FS_PHY_DEDICATED)
+            return FALSE;
+        if (((dwCfg2 & GHWCFG2_HS_PHY_MASK) >> GHWCFG2_HS_PHY_SHIFT) != GHWCFG2_HS_PHY_UTMI)
+            return FALSE;
+        return (((Rd(HPRT0) & HPRT0_SPD_MASK) >> HPRT0_SPD_SHIFT) == HPRT0_SPD_FULL) ? TRUE : FALSE;
+    }
     void  AckPortChanges(DWORD dwHprt);     // clear the change bits set in dwHprt
     void  PortResetBegin(void);             // start driving reset
     void  PortResetEnd(void);               // release reset

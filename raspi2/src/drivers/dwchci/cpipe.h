@@ -162,6 +162,7 @@ private:
     BOOL            m_fOpen;
     BOOL            m_fHalted;
     BOOL            m_fLoggedData;      // first data packet logged (bring-up aid)
+    BOOL            m_fLoggedLsBlock;   // logged the low-speed-behind-FS-hub refusal
     BOOL            m_fWaitingChannel;  // head transfer waits for a free channel
     BOOL            m_fWaitingFrame;    // head transfer waits for its due frame
     DWORD           m_dwNextFrame;      // HFNUM value to start the next poll at

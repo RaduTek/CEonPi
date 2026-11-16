@@ -97,8 +97,10 @@
 #define GHWCFG2_ARCH_INT_DMA        2
 #define GHWCFG2_HS_PHY_SHIFT        6
 #define GHWCFG2_HS_PHY_MASK         (0x3UL << 6)    // 1 = UTMI+, 2 = ULPI, 3 = both
+#define GHWCFG2_HS_PHY_UTMI         1
 #define GHWCFG2_FS_PHY_SHIFT        8
 #define GHWCFG2_FS_PHY_MASK         (0x3UL << 8)
+#define GHWCFG2_FS_PHY_DEDICATED    1               // dedicated full speed PHY
 #define GHWCFG2_NUM_HOST_CHAN_SHIFT 14
 #define GHWCFG2_NUM_HOST_CHAN_MASK  (0xFUL << 14)   // value + 1 channels
 #define GHWCFG2_PERIO_EP            DWC_BIT(18)

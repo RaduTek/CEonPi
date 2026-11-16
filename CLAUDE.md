@@ -122,6 +122,20 @@ controller so keyboards, mice and USB Ethernet work.
   Root-port devices report hub 0. For split
   transactions the HCCHAR `MULTICNT` field is the error/retry count: 3 for interrupt/isoc, 1 for
   control/bulk (dwc2 `hcd.c:1239`), already in `ChannelStart`.
+- **Hardware limit - low speed behind a full speed hub is not supported.** The BCM2835 core has a
+  dedicated full speed PHY plus a UTMI+ high speed PHY (`GHWCFG2=0x228DDD50`: HS PHY=UTMI, FS
+  PHY=dedicated). In that configuration the core **cannot generate low speed PRE packets while the
+  root port runs at full speed**, so a low speed device behind a full speed hub is unreachable -
+  the dwc2 driver refuses it (`hcd.c dwc2_hcd_urb_enqueue` returns `-ENODEV` for
+  LS + dedicated-FS-PHY + UTMI-HS-PHY + full-speed root port). We did the opposite and programmed
+  the channel, so the core put a low speed token on the FS bus, the device babbled and the core
+  disabled the root port - a reset loop that took down the hub and every device on it (observed
+  when a LS mouse is plugged into a Dell keyboard's built-in FS hub). `CDwcCore::LowSpeedUnreachable`
+  detects the condition and `CDwcPipe::IssueTransfer` fails the transfer cleanly
+  (`USB_DEVICE_NOT_RESPONDING_ERROR`), so only that one device fails to enumerate while the rest of
+  the bus stays up. A low speed device behind a **high speed** hub (root port at HS) still works via
+  splits; a low speed device **on the root port** still works (root port negotiates LS). Only
+  low-speed-behind-a-FS-hub is impossible on this silicon.
 - Interrupt splits (Step 3) tested on hardware: HID behind a hub delivers input (`split interrupt
   pipe ep 0x8x alive`). `CDwcTt::Reserve/Release` gives each periodic split pipe a start microframe
   from a coarse per-microframe byte budget; `OpenPipe` reserves it (releases in `ClosePipe`);
