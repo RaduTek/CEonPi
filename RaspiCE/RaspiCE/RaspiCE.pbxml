@@ -19,6 +19,9 @@
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_commctrl" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_connmc" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_menu_tap_ui" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sdhc_standard" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sdbus" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sd_memory" />
   </FeatureCollection>
   <ConfigurationCollection Name="Configurations" EnforceUniqueItems="False">
     <Configuration Name="Item" TargetBinFilename="nk.bin" BuildType="Debug" FriendlyName="raspi2 ARMV6 Debug">
