@@ -44,6 +44,9 @@
 #define GUSBCFG_PHYSEL          DWC_BIT(6)
 #define GUSBCFG_SRPCAP          DWC_BIT(8)
 #define GUSBCFG_HNPCAP          DWC_BIT(9)
+#define GUSBCFG_USBTRDTIM_SHIFT 10              // USB turnaround time, in PHY clocks
+#define GUSBCFG_USBTRDTIM_MASK  (0xFUL << 10)
+#define GUSBCFG_USBTRDTIM_8BIT  9               // for an 8 bit UTMI+ PHY (16 bit = 5)
 #define GUSBCFG_ULPI_FS_LS      DWC_BIT(17)
 #define GUSBCFG_ULPI_CLK_SUSP_M DWC_BIT(19)
 #define GUSBCFG_ULPI_EXT_VBUS_DRV DWC_BIT(20)

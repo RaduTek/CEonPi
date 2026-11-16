@@ -282,10 +282,18 @@ BOOL CDwcCore::HostInit(void)
             return FALSE;
     }
 
-    // Host only: no ULPI low power clocking, no HNP or SRP
+    // Host only: no ULPI low power clocking, no HNP or SRP. Also program the
+    // USB turnaround time for the PHY width: the BCM2835 has an 8 bit UTMI+ PHY
+    // (GHWCFG4 utmiwidth=0), which needs USBTRDTIM=9; the firmware leaves it at
+    // the 16 bit value of 5, too short for this PHY. dwc2 sets this per PHY in
+    // dwc2_set_turnaround_time(); without it the bus is turned around too early,
+    // which the tight margins of low speed traffic cannot tolerate (a low speed
+    // device behind a full speed hub babbles and the core disables the port).
     dwCfg = Rd(GUSBCFG);
     dwCfg &= ~(GUSBCFG_ULPI_FS_LS | GUSBCFG_ULPI_CLK_SUSP_M);
     dwCfg &= ~(GUSBCFG_HNPCAP | GUSBCFG_SRPCAP);
+    dwCfg &= ~GUSBCFG_USBTRDTIM_MASK;
+    dwCfg |= (GUSBCFG_USBTRDTIM_8BIT << GUSBCFG_USBTRDTIM_SHIFT);
     Wr(GUSBCFG, dwCfg);
 
     // Internal DMA on. Bit 4 is the BCM2835 specific "wait for all AXI
