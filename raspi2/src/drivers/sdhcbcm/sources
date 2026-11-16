@@ -1,0 +1,17 @@
+# BCM2835 SD host controller driver (src\drivers\sdhcbcm).
+#
+# Milestone M0 is a self-contained probe: it maps the Arasan eMMC and GPIO
+# blocks and dumps their state through KITL at load. It does NOT link the CE
+# SD host MDD (SDHCBase.lib) yet, so it builds with no SD catalog items.
+# Later milestones add that link and turn this into a real SD host PDD.
+
+TARGETNAME=sdhcbcm
+TARGETTYPE=DYNLINK
+DLLENTRY=_DllMainCRTStartup
+
+SOURCES= \
+    sdhcbcm.cpp
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib

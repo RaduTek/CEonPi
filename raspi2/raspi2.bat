@@ -26,7 +26,13 @@ rem
 set BSP_NOTOUCH=1
 
 rem
-rem IMGFLASH=1 configures the kernel to be read off the SD card. 
+rem IMGFLASH=1 configures the kernel to be read off the SD card.
 rem Remove this env var if you want to download the kernel via KITL
 rem
 set IMGFLASH=1
+
+rem
+rem BSP_NOSD=1 leaves out the SD host controller driver (currently the M0
+rem probe in src\drivers\sdhcbcm). Leave it unset to include the driver.
+rem
+rem set BSP_NOSD=1

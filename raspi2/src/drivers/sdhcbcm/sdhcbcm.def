@@ -1,0 +1,16 @@
+;
+; BCM2835 SD host controller driver. Stream interface exports (prefix "SDP").
+; M0 build: SDP_Init runs the probe; the remaining entries are stubs.
+;
+LIBRARY         SDHCBCM
+
+EXPORTS         SDP_Init
+                SDP_Deinit
+                SDP_Open
+                SDP_Close
+                SDP_Read
+                SDP_Write
+                SDP_Seek
+                SDP_IOControl
+                SDP_PowerUp
+                SDP_PowerDown

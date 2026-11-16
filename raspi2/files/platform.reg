@@ -88,6 +88,16 @@ IF BSP_NOUSB !
 ENDIF BSP_NOUSB !
 ; @CESYSGEN ENDIF CE_MODULES_USBD
 
+; SD host controller driver (src\drivers\sdhcbcm). M0 probe: SDP_Init dumps the
+; Arasan eMMC + GPIO state through KITL at load and then stays resident.
+; Set BSP_NOSD=1 to leave it out. The real SD host PDD will replace this.
+IF BSP_NOSD !
+[HKEY_LOCAL_MACHINE\Drivers\BuiltIn\SDHCBcm]
+   "Prefix"="SDP"
+   "Dll"="sdhcbcm.dll"
+   "Order"=dword:32
+ENDIF BSP_NOSD !
+
 ; Placeholder for Network driver
 [HKEY_LOCAL_MACHINE\Drivers\USB\LoadClients\1060_60416\Default\Default\STDMICROETHCTLR]
    "Prefix"="TST"
