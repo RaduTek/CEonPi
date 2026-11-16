@@ -5,7 +5,7 @@ This project is a Board Support Package (BSP) for the BCM2835-based Raspberry Pi
 <img src="docs/pi_zero_booted.jpg" alt="Raspberry Pi Zero booted to WEC7 desktop" height="350">
 
 This project was started out in 2013 by **Doug Boling** (Boling Consulting Inc, 
-[www.bolingconsulting.com](http://bolingconsulting.com)), but development stopped at the USB host controller driver. All the important work of getting the bootloader set up, a basic display driver and debugger connection has been layed out, but due to no USB drivers it wasn't usable.
+[www.bolingconsulting.com](http://bolingconsulting.com)) over on [Codeplex](https://web.archive.org/web/20140417034241/http://ceonpi.codeplex.com/) (RIP), but development stopped at the USB host controller driver. All the important work of getting the bootloader set up, a basic display driver and debugger connection has been layed out, but due to no USB drivers it wasn't usable.
 
 See [Original README of 2013 project](docs/codeplex_readme.md) and [original author update from 2018](http://bolingconsulting.com/2018/what-happened-to-the-raspberry-pi-project/).
 
