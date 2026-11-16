@@ -96,6 +96,13 @@ CDwcPipe::CDwcPipe(IN const LPCUSB_ENDPOINT_DESCRIPTOR lpEndpointDescriptor,
     m_dwNextPid = HCTSIZ_PID_DATA0;
     m_pHead = NULL;
     m_hAbortEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    // Diagnostic (one line per pipe, enumeration only): what hcd2lib hands us,
+    // to see how a full/low speed device behind a full speed hub is classified.
+    DWCMSG((TEXT("DWCHCI: new pipe ep 0x%02x type %d addr %d ls %d hs %d hub %d port %d tt %d -> split %d\r\n"),
+            m_bEndpointAddress, m_bEpType, bDeviceAddress,
+            fIsLowSpeed, fIsHighSpeed, bHubAddress, bHubPort,
+            (ttContext != NULL) ? 1 : 0, m_fDoSplit ? 1 : 0));
 }
 
 CDwcPipe::~CDwcPipe()

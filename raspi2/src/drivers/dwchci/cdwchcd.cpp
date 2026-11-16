@@ -602,6 +602,7 @@ void CDwcHcd::HandlePort(void)
         else if (!m_fInReset && !m_fDisableRequested)
         {
             // The core disabled the port by itself (babble, disconnect)
+            DWCMSG((TEXT("DWCHCI: root port disabled by core, HPRT0=0x%08x\r\n"), dwHprt));
             m_dwPortChange |= DWC_PC_ENABLE;
             fSignal = TRUE;
         }
