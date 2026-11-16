@@ -345,9 +345,15 @@ HCD_REQUEST_STATUS CDwcPipe::IssueTransfer(
 
     m_pHcd->LockHc();
 
-    if (!m_fOpen || !m_pHcd->IsPortEnabled())
+    // A closed pipe cannot accept transfers. With the port down, a control or
+    // bulk transfer cannot make progress either, so fail it. An interrupt
+    // transfer is instead left pending (below): its owner - a hub's status-
+    // change thread, or usbhid - blocks on completion, and a synchronous
+    // failure makes that thread spin. It starts when the port returns, or is
+    // cancelled by AbortTransfer when the device is torn down.
+    if (!m_fOpen ||
+        (!m_pHcd->IsPortEnabled() && m_bEpType != USB_ENDPOINT_TYPE_INTERRUPT))
     {
-        // The device is gone. A channel started now would never finish.
         m_pHcd->UnlockHc();
         FreeTransfer(m_pHcd, pTransfer);
         __try
@@ -366,13 +372,19 @@ HCD_REQUEST_STATUS CDwcPipe::IssueTransfer(
     if (m_pHead == NULL)
     {
         m_pHead = pTransfer;
+        if (!m_pHcd->IsPortEnabled())
+        {
+            // Interrupt transfer on a down port: leave it pending (do not start
+            // a channel that cannot run). The owner blocks until it completes
+            // or is aborted on teardown.
+        }
         // An interrupt endpoint is polled once per interval. If the client
         // re-issues right after a report (a mouse in constant motion returns
         // data on every poll), hold the next poll to the interval boundary
         // instead of starting at once, so the device is not over-polled and
         // its reports do not overrun the HID queue.
-        if (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT &&
-            !m_pHcd->Core()->FrameReached((m_dwLastPollFrame + m_dwInterval) & HFNUM_MAX_FRNUM))
+        else if (m_bEpType == USB_ENDPOINT_TYPE_INTERRUPT &&
+                 !m_pHcd->Core()->FrameReached((m_dwLastPollFrame + m_dwInterval) & HFNUM_MAX_FRNUM))
         {
             ScheduleNextInterval();
         }
@@ -1066,13 +1078,6 @@ void CDwcPipe::OnDisconnect(DWC_TRANSFER **ppDone)
     m_iChannel = -1;
     m_fWaitingChannel = FALSE;
     ClearFrameWait();
-
-    // The device is gone. Halt the pipe so the library stops retrying on it:
-    // after a failed transfer it checks IsPipeHalted and gives up on the device
-    // when set. Without this, a hub behind the unplugged one (a nested hub whose
-    // parent vanished, so nothing else tears it down) polls its status endpoint
-    // forever - every attempt fails, is retried at once, and never terminates.
-    m_fHalted = TRUE;
 
     while ((pTransfer = m_pHead) != NULL)
     {
