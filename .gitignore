@@ -1,3 +1,11 @@
+# Release dir
+RelDir/
+
+# VS files
+*.suo
+*.user
+
+# Log files
 bootlog.txt
 *.log
-*.suo
+*.wrn
