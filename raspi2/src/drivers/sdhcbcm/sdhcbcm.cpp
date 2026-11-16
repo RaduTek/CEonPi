@@ -22,7 +22,8 @@
 #include <windows.h>
 #include <nkintr.h>
 #include <ceddk.h>
-#include <image_cfg.h>     // PERIPHERAL_PA_BASE (bcm2835.h builds its addresses from it)
+#include <pkfuncs.h>       // KernelIoControl
+#include <image_cfg.h>     // PERIPHERAL_PA_BASE, IOCTL_HAL_MY_GET_EMMC_CLOCK
 #include "bcm2835.h"
 
 // Size of the register window we map for the probe (one 4K page is plenty;
@@ -121,6 +122,22 @@ static void DoProbe(void)
     } else {
         RETAILMSG(1, (TEXT("SDPROBE: MmMapIoSpace(GPIO 0x%08x) FAILED\r\n"),
                       (DWORD)GPIO_PA_BASE));
+    }
+
+    // Ask the OAL for the VideoCore EMMC base clock. The capabilities register
+    // reads 0 on this core, so this mailbox-sourced value is what M1 will feed
+    // the MDD as BaseClockFrequency. Proves the OAL IOCTL / mailbox path too.
+    {
+        DWORD dwClock = 0;
+        DWORD dwOut = 0;
+        if (KernelIoControl(IOCTL_HAL_MY_GET_EMMC_CLOCK, NULL, 0,
+                            &dwClock, sizeof(dwClock), &dwOut)
+            && dwOut == sizeof(dwClock)) {
+            RETAILMSG(1, (TEXT("SDPROBE: EMMC base clock = %u Hz (%u MHz)\r\n"),
+                          dwClock, dwClock / 1000000));
+        } else {
+            RETAILMSG(1, (TEXT("SDPROBE: EMMC clock query (IOCTL) FAILED\r\n")));
+        }
     }
 
     RETAILMSG(1, (TEXT("SDPROBE: -- probe done\r\n")));

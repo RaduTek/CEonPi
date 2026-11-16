@@ -93,6 +93,11 @@ extern "C" {
 // I use this to pass display configuration info to the display driver
 #define IOCTL_HAL_MY_GET_HARDWARE_POINTERS   CTL_CODE(FILE_DEVICE_HAL, 2048+11, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
+// The SD host driver uses this to read the VideoCore EMMC base clock (in Hz),
+// because the BCM2835 Arasan capabilities register reads 0. Output buffer is a
+// single DWORD (the clock rate). Handler: OALIoCtlHalGetEmmcClock in ioctl.c.
+#define IOCTL_HAL_MY_GET_EMMC_CLOCK          CTL_CODE(FILE_DEVICE_HAL, 2048+12, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
 // Structure used by the interrupt code to manage the serial FIFO buffers
 typedef struct {
 	PBYTE pRecvBuff;
