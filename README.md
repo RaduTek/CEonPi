@@ -72,7 +72,7 @@ These are hardware features that are functional
 | UART | Basic | Used for KITL debugger connection with Visual Studio |
 | Display | Basic | Fixed resolution, no acceleration whatsoever |
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
-| SD Host | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
+| [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
 
 [^1]: Low-speed USB devices won't work when connected to a Full-speed USB hub directly attached to the root port.<br>
 Only applies to full-speed USB 1.1 hubs and the Pi Zero, since Pi 1 has a built-in USB 2.0 hub.<br>
