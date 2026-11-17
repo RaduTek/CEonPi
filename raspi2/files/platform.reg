@@ -112,9 +112,13 @@ IF BSP_NOSD !
    ; makes slower cards fail every data transfer with a Data Timeout (0x10).
    "BaseClockFrequency"=dword:0BEBC200
    "TimeoutClockFrequency"=dword:017D7840
-   ; Bring the stack up in PIO first (M1). DMA (SDMA + the VideoCore bus-address
-   ; offset) is enabled in M2 by clearing this.
-   "DisableDMA"=dword:1
+   ; DMA on (M2). SDMA, with the physical->VideoCore bus-address translation in
+   ; CSDHCSlotBcmSDMA. Set DisableDMA=1 to fall back to the M1 PIO path.
+   "DisableDMA"=dword:0
+   ; VideoCore DMA bus-address offset the SDMA object adds to CE physical
+   ; addresses (0x40000000 = L2-coherent alias, as the USB DmaBusOffset). Try
+   ; 0xC0000000 (uncached alias) if DMA reads/writes come back corrupt.
+   "DmaBusOffset"=dword:40000000
 ENDIF BSP_NOSD !
 
 ; Placeholder for Network driver
