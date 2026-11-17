@@ -226,6 +226,30 @@ ARM1176.
     `platform.reg` edit needs **Copy Files to Release Directory** (or a manual copy into
     `...\RelDir\raspi2_ARMV6_Debug\`) **before** `makeimg`, or the stale value is baked in. Confirm by
     the `timeout control value of 0x..` log line changing. (Same lesson as the M1 SD-DLL packaging.)
+- **M2 (DMA) attempted and abandoned - built-in SDHCI DMA does not work on this silicon.**
+  The shipping SD driver is **PIO only** (`DisableDMA=1`); the card mounts and reads/writes reliably.
+  Do not re-enable `DisableDMA=0` expecting it to work.
+  - What was tried: a `CSDHCSlotBcmSDMA` subclass (swapped in via an overridden `HandleInsertion`)
+    that biased the MDD's page physical addresses to VideoCore bus addresses before the SDMA System
+    Address register write, plus enabling the OAL `IOCTL_HAL_GET_CACHE_INFO` handler (see below).
+  - What happened: the address translation was verified correct (`bus0 = pa0 + offset`), but the
+    first multi-block DMA read **hangs** - the engine arms and the command issues, yet no SDMA
+    boundary or Transfer Complete interrupt ever fires and no data moves. Tried both the
+    `0x40000000` (L2-coherent) and `0xC0000000` (uncached) bus aliases; identical hang, so it is not
+    addressing or cache coherency.
+  - Root cause: the BCM2835 Arasan's EMMC FIFO needs **DREQ flow control**, which the controller's
+    built-in SDMA (and ADMA2) master does not provide. FreeBSD `bcm2835_sdhci.c` and the Linux
+    drivers therefore **never use SDHCI SDMA/ADMA2**; they drive SD data through the **external
+    BCM2835 DMA engine** (DREQ-paced, `BCM_DMA_DREQ_EMMC`), with PIO for sub-block transfers. The CE
+    standard MDD only knows built-in SDMA/ADMA2, so it cannot drive DMA on this controller at all.
+  - **Future DMA path (not done):** integrate the external BCM2835 DMA engine (the DREQ-paced
+    controller behind `src/INC/DMA.h`) and feed the SD data path directly, bypassing the MDD's
+    transfer machinery - the CE equivalent of FreeBSD's `SDHCI_PLATFORM_TRANSFER` hooks (which the
+    MDD does not expose). This is a milestone in its own right.
+  - **Kept from the M2 work:** the OAL now answers `IOCTL_HAL_GET_CACHE_INFO`
+    (`src\oal\oallib\ioctl.c`, the handler line was commented out) via the common
+    `OALIoCtlHalGetCacheInfo` over `g_oalCacheInfo`. It was broken (returned FALSE -> `CeGetCacheInfo`
+    failed), which a future DMA path would need; it is harmless to PIO.
 
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle

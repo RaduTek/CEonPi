@@ -112,13 +112,13 @@ IF BSP_NOSD !
    ; makes slower cards fail every data transfer with a Data Timeout (0x10).
    "BaseClockFrequency"=dword:0BEBC200
    "TimeoutClockFrequency"=dword:017D7840
-   ; DMA on (M2). SDMA, with the physical->VideoCore bus-address translation in
-   ; CSDHCSlotBcmSDMA. Set DisableDMA=1 to fall back to the M1 PIO path.
-   "DisableDMA"=dword:0
-   ; VideoCore DMA bus-address offset the SDMA object adds to CE physical
-   ; addresses (0x40000000 = L2-coherent alias, as the USB DmaBusOffset). Try
-   ; 0xC0000000 (uncached alias) if DMA reads/writes come back corrupt.
-   "DmaBusOffset"=dword:40000000
+   ; Keep DMA OFF - PIO only. The BCM2835 Arasan's built-in SDHCI SDMA/ADMA2
+   ; does not work (it needs the external BCM DMA engine with EMMC DREQ pacing,
+   ; which the CE standard MDD cannot drive): the engine arms but never moves
+   ; data or raises a completion interrupt, hanging the first multi-block
+   ; transfer. PIO is the working path. Do not clear this without first adding
+   ; external-DMA-engine support. See the SD section of CLAUDE.md.
+   "DisableDMA"=dword:1
 ENDIF BSP_NOSD !
 
 ; Placeholder for Network driver
