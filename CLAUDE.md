@@ -203,6 +203,29 @@ ARM1176.
   cached VA 0x80002000 doubles as the bus address, as the framebuffer path does). The probe reads it
   with `KernelIoControl`. Result: **EMMC base clock = 200000000 Hz (200 MHz)** - this is
   `BaseClockFrequency` for M1.
+- **M1 done and verified on a Pi Zero** (PIO path; `DisableDMA=1`). The PDD
+  (`src\drivers\sdhcbcm`, prefix SHC) over the CE standard MDD brings the stack up: card
+  enumerates through `sdbus`/`sdmemory`, the partition mounts and a **Storage Card** volume is
+  browsable with file read/write. Verified on both a 1 GB SDSC card (`Profile=SDMemory`,
+  NumSectors=2010112) and a 4 GB SDHC card (`Profile=SDHCMemory`, high capacity, NumSectors=7736320).
+  - **Data-timeout-clock trap (the one real bug found in M1).** The Arasan's data-timeout counter
+    runs off **SDCLK**, not a separate TMCLK (FreeBSD `bcm2835_sdhci`:
+    `SDHCI_QUIRK_DATA_TIMEOUT_USES_SDCLK` + `SDHCI_QUIRK_BROKEN_TIMEOUT_VAL`). `TimeoutClockFrequency`
+    was first set to the 200 MHz base clock; the MDD then computes a Timeout Control value of `0x10`
+    to hit its 2.7 s target, which **overflows the 4-bit TC register field to 0** (the minimum
+    ~41 us window). A fast card returns data inside 41 us (the 1 GB SDSC card mounted), but a slower
+    4 GB SDHC card fails **every** data transfer with a Data Timeout (`ERROR INT STATUS=0x10`,
+    CMD6/CMD17), so the MBR cannot be read and the volume will not mount. Fix: set
+    `TimeoutClockFrequency` = 25 MHz (`0x017D7840`, the SD data clock) in `platform.reg`; the MDD then
+    computes TC `0xD` (log line `Using timeout control value of 0xd`) - in range, real window ~2.7 s.
+    `BaseClockFrequency` stays 200 MHz (it drives the clock divider: 25 MHz data clock, 781250 Hz ID
+    clock). The ID clock is out of spec (wants <=400 kHz; 8-bit divider caps the minimum); both cards
+    tolerate it - revisit with the SDHCI-3.0 10-bit divider in M3.
+  - **Build trap (bit us twice).** `makeimg` builds the image registry from the copy of
+    `platform.reg` in the **flat release dir**; it does **not** refresh it from the platform tree. A
+    `platform.reg` edit needs **Copy Files to Release Directory** (or a manual copy into
+    `...\RelDir\raspi2_ARMV6_Debug\`) **before** `makeimg`, or the stale value is baked in. Confirm by
+    the `timeout control value of 0x..` log line changing. (Same lesson as the M1 SD-DLL packaging.)
 
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle
