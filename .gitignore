@@ -10,6 +10,7 @@ obj/
 *.user
 
 # Log files
-bootlog.txt
+*log.txt
 *.log
 *.wrn
+BuildARMV*.dat
