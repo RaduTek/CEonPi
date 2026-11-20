@@ -86,12 +86,12 @@ Things I plan on getting working, in order of priority, after getting Pi 1 board
 
 | Feature | Comments |
 |-|-|
-| Real-Time Clock | Most of the needed code seems to be there, but the clock in the taskbar is frozen at 12:00 |
-| SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |
 | USB Ethernet | Implement a driver for the SMSC ethernet controller hub of the Pi 1 |
 | Audio | Support the built-in analog audio output of the Pi 1 model B |
+| Real-Time Clock | Most of the needed code seems to be there, but the clock in the taskbar is frozen at 12:00 |
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |
 | Better Display | Support Composite output, no hardcoded resolution in CE image |
+| SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |
 | USB Function | Useful only on the Pi Zero, let the Pi be connected as a USB device to a computer<br>(for ActiveSync or Mass Storage) |
 | USB Isochronous mode | Needed for USB audio and video class devices<br>CE only includes a USB audio driver |
 
