@@ -147,14 +147,21 @@ BOOL OEMInterruptEnable(DWORD dwSysIntr, LPVOID pvData, DWORD cbData)
 
 	case SYSINTR_USBHOST:
 		{
-			*pIrqEnabIrq1Reg = RASPI_IRQR1_VC_USB;  
+			*pIrqEnabIrq1Reg = RASPI_IRQR1_VC_USB;
 			//OEMWriteDebugString(L"SYSINTR_UART0 enabled\r\n");
+		}
+		break;
+
+	case SYSINTR_SDHC:
+		{
+			// Arasan eMMC is GPU IRQ 62, enabled in the second IRQ register.
+			*pIrqEnabIrq2Reg = RASPI_IRQR2_VC_ARASANSDIO;
 		}
 		break;
 
 	case SYSINTR_RESCHED:
 		{
-			*pIrqEnabIrq1Reg = RASPI_IRQR1_TIMER3;  
+			*pIrqEnabIrq1Reg = RASPI_IRQR1_TIMER3;
 			//OEMWriteDebugString(L"SYSINTR_RESCHED enabled\r\n");
 		}
 		break;
@@ -186,13 +193,19 @@ void OEMInterruptDisable(DWORD dwSysIntr)
 
 	case SYSINTR_USBHOST:
 		{
-			*pIrqDisabIrq1Reg = RASPI_IRQR1_VC_USB;  
+			*pIrqDisabIrq1Reg = RASPI_IRQR1_VC_USB;
+		}
+		break;
+
+	case SYSINTR_SDHC:
+		{
+			*pIrqDisabIrq2Reg = RASPI_IRQR2_VC_ARASANSDIO;
 		}
 		break;
 
 	case SYSINTR_RESCHED:
 		{
-			*pIrqDisabIrq1Reg = RASPI_IRQR1_TIMER3;  
+			*pIrqDisabIrq1Reg = RASPI_IRQR1_TIMER3;
 		}
 		break;
 
@@ -234,6 +247,12 @@ void OEMInterruptDone(DWORD dwSysIntr)
 	case SYSINTR_USBHOST:
 		{
 			*pIrqEnabIrq1Reg = RASPI_IRQR1_VC_USB;
+		}
+		break;
+
+	case SYSINTR_SDHC:
+		{
+			*pIrqEnabIrq2Reg = RASPI_IRQR2_VC_ARASANSDIO;
 		}
 		break;
 
@@ -462,6 +481,16 @@ VidCON_WriteDebugByteExtern('#');
 
 			// provide the ID
 			SysIntr = SYSINTR_USBHOST;
+		}
+		// ------------------------------------
+		// Check for Arasan eMMC (SD host) int
+		// ------------------------------------
+		else if (dwBasePend & RASPI_BASE_ARASANSDIO)
+		{
+			// Mask it until the SD host IST services it; OEMInterruptDone
+			// re-enables it.
+			*pIrqDisabIrq2Reg = RASPI_IRQR2_VC_ARASANSDIO;
+			SysIntr = SYSINTR_SDHC;
 		}
 		// ------------------------------------
 		// Check for UART 0 int (KITL)

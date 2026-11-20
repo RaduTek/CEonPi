@@ -88,6 +88,39 @@ IF BSP_NOUSB !
 ENDIF BSP_NOUSB !
 ; @CESYSGEN ENDIF CE_MODULES_USBD
 
+; SD host controller driver (src\drivers\sdhcbcm): the BCM2835 PDD over the CE
+; standard SD host MDD. Set BSP_NOSD=1 to leave it out.
+IF BSP_NOSD !
+[HKEY_LOCAL_MACHINE\Drivers\BuiltIn\SDHCBcm]
+   "Prefix"="SHC"
+   "Dll"="sdhcbcm.dll"
+   "Order"=dword:21
+   ; The MDD looks up this exported factory to build the BCM2835 controller.
+   "ObjectCreationProc"="CreateSDHCBcmObject"
+   ; Arasan eMMC register window: 0x20300000, 256 bytes, on the Internal bus.
+   "MemBase"=dword:20300000
+   "MemLen"=dword:00000100
+   "InterfaceType"=dword:0
+   "BusNumber"=dword:0
+   ; Static SysIntr for GPU IRQ 62, wired in the OAL as SYSINTR_SDHC (= 18).
+   "SysIntr"=dword:12
+   ; The Arasan capabilities register reads 0, so give the MDD the
+   ; mailbox-reported EMMC base clock (200000000 = 0x0BEBC200). The data
+   ; timeout counter runs off SDCLK, so 25 MHz (0x017D7840), not 200 MHz:
+   ; 200 MHz makes the MDD compute a timeout control value of 0x10, which
+   ; overflows the 4-bit register field to 0 (the minimum ~41 us window) and
+   ; makes slower cards fail every data transfer with a Data Timeout (0x10).
+   "BaseClockFrequency"=dword:0BEBC200
+   "TimeoutClockFrequency"=dword:017D7840
+   ; Keep DMA OFF - PIO only. The BCM2835 Arasan's built-in SDHCI SDMA/ADMA2
+   ; does not work (it needs the external BCM DMA engine with EMMC DREQ pacing,
+   ; which the CE standard MDD cannot drive): the engine arms but never moves
+   ; data or raises a completion interrupt, hanging the first multi-block
+   ; transfer. PIO is the working path. Do not clear this without first adding
+   ; external-DMA-engine support. See the SD section of CLAUDE.md.
+   "DisableDMA"=dword:1
+ENDIF BSP_NOSD !
+
 ; Placeholder for Network driver
 [HKEY_LOCAL_MACHINE\Drivers\USB\LoadClients\1060_60416\Default\Default\STDMICROETHCTLR]
    "Prefix"="TST"

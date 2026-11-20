@@ -98,6 +98,13 @@ IF BSP_USB_EHCI
 ENDIF BSP_USB_EHCI
 ENDIF BSP_NOUSB !
 ; @CESYSGEN ENDIF CE_MODULES_USBD
+
+; SD host controller driver (src\drivers\sdhcbcm): BCM2835 PDD over the CE
+; standard SD host MDD. Requires the SD stack in the OS design (sdbus.dll,
+; sdmemory.dll). Set BSP_NOSD=1 to leave it out.
+IF BSP_NOSD !
+    sdhcbcm.dll        $(_FLATRELEASEDIR)\sdhcbcm.dll                  NK     SHK
+ENDIF BSP_NOSD !
 ; @CESYSGEN ENDIF CE_MODULES_DEVICE
 
 ; The FILES section describes any files that stored in the image but not

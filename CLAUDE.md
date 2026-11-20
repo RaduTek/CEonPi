@@ -173,10 +173,90 @@ behind a high-speed hub. DMA needs bus addresses, not CE physical or virtual add
 check how the display driver passes addresses to the GPU. Cache coherency matters on the
 ARM1176.
 
+## SD card storage driver (goal: mount the SD card as a FAT volume in CE)
+- Plan/decision: drive the **Arasan eMMC (SDHCI)** controller at `0x20300000` (GPU IRQ 62) and
+  reuse the CE standard SD host MDD `SDHCBase.lib` (`CSDHCBase`/`CSDHCSlotBase`, under
+  `public\common\oak\drivers\sdcard\SDHCDrivers\SDIOStdHC\base`); write only a thin BCM2835 PDD, a
+  sibling of the shipped `pci` PDD. Not the Broadcom SDHOST (`0x20202000`, IRQ 56), which has no
+  datasheet and no MDD. Driver source is `src\drivers\sdhcbcm` (`sdhcbcm.dll`). DMA from the start
+  (the MDD has SDMA + 32-bit ADMA2 built in). Full plan: `~/.claude/plans/typed-weaving-flame.md`.
+- **M0 done and verified on a Pi Zero** (probe driver, register/GPIO dump at load):
+  - `MmMapIoSpace(0x20300000)` works from a kernel-mode driver.
+  - `HOST_VERSION=0x9902` (spec-version field 2 = SDHCI 3.00, vendor 0x99).
+  - `PRESENT_STATE=0x1fff0000`: card inserted, state stable, detect signal, write-enabled, all
+    CMD/DAT lines idle-high. The card is on the Arasan.
+  - GPIO 48-53 function-select = **ALT3** (`GPFSEL4=0x3f209809 GPFSEL5=0x00000fff`), which routes
+    those pins to this controller. So the firmware wired the SD card to the Arasan; no pin re-route
+    or `config.txt` change is needed.
+  - **`CAPABILITIES`=0x00000000 (both words).** The BCM2835 Arasan does not implement the SDHCI
+    capabilities register (Linux `SDHCI_QUIRK_MISSING_CAPS`; FreeBSD `bcm2835_sdhci` hardcodes caps
+    and reads the clock from the mailbox). Consequence for M1: the MDD reads caps in
+    `CSDHCSlotBase::Init` to derive base clock, DMA mode, Vdd windows and max block length, so the
+    PDD must **override `GetCapabilities()` to synthesize caps** and **supply the base clock from
+    the VideoCore mailbox** (the OAL has only the simple power mailbox; the property-tag query must
+    be done driver-side, modelled on `src\bootloader\sloader\PropTest.cpp`). FreeBSD's
+    `bcm2835_sdhci.c` (BSD) has the exact synthesized caps and the clock query to copy.
+- **M0.5 done and verified on a Pi Zero.** Rather than a driver-side mailbox, the base clock is
+  read through a new OAL IOCTL `IOCTL_HAL_MY_GET_EMMC_CLOCK` (`ioctl.c` `OALIoCtlHalGetEmmcClock`):
+  the VideoCore "get clock rate" property tag for the EMMC clock, via the OAL's mailbox and the
+  shared 0x2000 buffer (clean-before / invalidate-after for ARM<->VideoCore coherence; the buffer's
+  cached VA 0x80002000 doubles as the bus address, as the framebuffer path does). The probe reads it
+  with `KernelIoControl`. Result: **EMMC base clock = 200000000 Hz (200 MHz)** - this is
+  `BaseClockFrequency` for M1.
+- **M1 done and verified on a Pi Zero** (PIO path; `DisableDMA=1`). The PDD
+  (`src\drivers\sdhcbcm`, prefix SHC) over the CE standard MDD brings the stack up: card
+  enumerates through `sdbus`/`sdmemory`, the partition mounts and a **Storage Card** volume is
+  browsable with file read/write. Verified on both a 1 GB SDSC card (`Profile=SDMemory`,
+  NumSectors=2010112) and a 4 GB SDHC card (`Profile=SDHCMemory`, high capacity, NumSectors=7736320).
+  - **Data-timeout-clock trap (the one real bug found in M1).** The Arasan's data-timeout counter
+    runs off **SDCLK**, not a separate TMCLK (FreeBSD `bcm2835_sdhci`:
+    `SDHCI_QUIRK_DATA_TIMEOUT_USES_SDCLK` + `SDHCI_QUIRK_BROKEN_TIMEOUT_VAL`). `TimeoutClockFrequency`
+    was first set to the 200 MHz base clock; the MDD then computes a Timeout Control value of `0x10`
+    to hit its 2.7 s target, which **overflows the 4-bit TC register field to 0** (the minimum
+    ~41 us window). A fast card returns data inside 41 us (the 1 GB SDSC card mounted), but a slower
+    4 GB SDHC card fails **every** data transfer with a Data Timeout (`ERROR INT STATUS=0x10`,
+    CMD6/CMD17), so the MBR cannot be read and the volume will not mount. Fix: set
+    `TimeoutClockFrequency` = 25 MHz (`0x017D7840`, the SD data clock) in `platform.reg`; the MDD then
+    computes TC `0xD` (log line `Using timeout control value of 0xd`) - in range, real window ~2.7 s.
+    `BaseClockFrequency` stays 200 MHz (it drives the clock divider: 25 MHz data clock, 781250 Hz ID
+    clock). The ID clock is out of spec (wants <=400 kHz; 8-bit divider caps the minimum); both cards
+    tolerate it - revisit with the SDHCI-3.0 10-bit divider in M3.
+  - **Build trap (bit us twice).** `makeimg` builds the image registry from the copy of
+    `platform.reg` in the **flat release dir**; it does **not** refresh it from the platform tree. A
+    `platform.reg` edit needs **Copy Files to Release Directory** (or a manual copy into
+    `...\RelDir\raspi2_ARMV6_Debug\`) **before** `makeimg`, or the stale value is baked in. Confirm by
+    the `timeout control value of 0x..` log line changing. (Same lesson as the M1 SD-DLL packaging.)
+- **M2 (DMA) attempted and abandoned - built-in SDHCI DMA does not work on this silicon.**
+  The shipping SD driver is **PIO only** (`DisableDMA=1`); the card mounts and reads/writes reliably.
+  Do not re-enable `DisableDMA=0` expecting it to work.
+  - What was tried: a `CSDHCSlotBcmSDMA` subclass (swapped in via an overridden `HandleInsertion`)
+    that biased the MDD's page physical addresses to VideoCore bus addresses before the SDMA System
+    Address register write, plus enabling the OAL `IOCTL_HAL_GET_CACHE_INFO` handler (see below).
+  - What happened: the address translation was verified correct (`bus0 = pa0 + offset`), but the
+    first multi-block DMA read **hangs** - the engine arms and the command issues, yet no SDMA
+    boundary or Transfer Complete interrupt ever fires and no data moves. Tried both the
+    `0x40000000` (L2-coherent) and `0xC0000000` (uncached) bus aliases; identical hang, so it is not
+    addressing or cache coherency.
+  - Root cause: the BCM2835 Arasan's EMMC FIFO needs **DREQ flow control**, which the controller's
+    built-in SDMA (and ADMA2) master does not provide. FreeBSD `bcm2835_sdhci.c` and the Linux
+    drivers therefore **never use SDHCI SDMA/ADMA2**; they drive SD data through the **external
+    BCM2835 DMA engine** (DREQ-paced, `BCM_DMA_DREQ_EMMC`), with PIO for sub-block transfers. The CE
+    standard MDD only knows built-in SDMA/ADMA2, so it cannot drive DMA on this controller at all.
+  - **Future DMA path (not done):** integrate the external BCM2835 DMA engine (the DREQ-paced
+    controller behind `src/INC/DMA.h`) and feed the SD data path directly, bypassing the MDD's
+    transfer machinery - the CE equivalent of FreeBSD's `SDHCI_PLATFORM_TRANSFER` hooks (which the
+    MDD does not expose). This is a milestone in its own right.
+  - **Kept from the M2 work:** the OAL now answers `IOCTL_HAL_GET_CACHE_INFO`
+    (`src\oal\oallib\ioctl.c`, the handler line was commented out) via the common
+    `OALIoCtlHalGetCacheInfo` over `g_oalCacheInfo`. It was broken (returned FALSE -> `CeGetCacheInfo`
+    failed), which a future DMA path would need; it is harmless to PIO.
+
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle
-projects all drive this controller. Use them as documentation. **Check each licence before copying
-code into this BSP.**
+projects all drive the USB controller. For the SD host, FreeBSD `bcm2835_sdhci.c`/`bcm2835_sdhost.c`
+(BSD) and NetBSD `sdhc.c` (BSD) are the permissive references; Linux (`bcm2835.c`,
+`sdhci-bcm2835.c`) and U-Boot are GPL (documentation only). Use them all as documentation.
+**Check each licence before copying code into this BSP.**
 
 ## Debugging notes
 - Kernel debug output goes through KITL (`KITLOutputDebugString`, `RETAILMSG` and `DEBUGMSG`) to

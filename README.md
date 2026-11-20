@@ -18,7 +18,7 @@ Images with KITL disabled (`IMGNOKITL=1`) boot very fast, around 10 seconds from
 **This BSP isn't intended for any serious use.** Windows CE is very much deprecated and has been replaced everywhere with Linux and especially Android for HMI.
 
 **AI assistance has been used to develop these drivers.** This is merely a hobby project, and I only have basic knowledge of both the CE driver stack and the actual hardware of the Pi.<br>
-This README document is handwritten, but architecture docs under `docs/` are mostly AI generated.
+This README document is mostly handwritten, but architecture docs under `docs/` are predominantly AI generated.
 
 ## Building the image
 
@@ -72,10 +72,13 @@ These are hardware features that are functional
 | UART | Basic | Used for KITL debugger connection with Visual Studio |
 | Display | Basic | Fixed resolution, no acceleration whatsoever |
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
+| [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
 
 [^1]: Low-speed USB devices won't work when connected to a Full-speed USB hub directly attached to the root port.<br>
 Only applies to full-speed USB 1.1 hubs and the Pi Zero, since Pi 1 has a built-in USB 2.0 hub.<br>
 This is a hardware limitation of the DWC2 controller, see [docs/usb.md](docs/usb.md) for more details.
+
+[^2]: SD transfers use PIO (programmed I/O), not DMA. The BCM2835 Arasan's built-in SDHCI DMA (SDMA/ADMA2) does not work: the controller needs the external BCM DMA engine with EMMC DREQ pacing (as the FreeBSD and Linux drivers use), which the CE standard SD host MDD cannot drive. Driving the external DMA engine is a possible future improvement.
 
 ### Future goals
 
@@ -84,7 +87,7 @@ Things I plan on getting working, in order of priority, after getting Pi 1 board
 | Feature | Comments |
 |-|-|
 | Real-Time Clock | Most of the needed code seems to be there, but the clock in the taskbar is frozen at 12:00 |
-| SD Host | Support mounting FAT partitions from the SD card |
+| SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |
 | USB Ethernet | Implement a driver for the SMSC ethernet controller hub of the Pi 1 |
 | Audio | Support the built-in analog audio output of the Pi 1 model B |
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |

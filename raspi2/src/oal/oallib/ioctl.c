@@ -17,6 +17,7 @@
 #include <bsp_cfg.h>
 #include <image_cfg.h>
 #include <video.h>
+#include <mailbox.h>
 //------------------------------------------------------------------------------
 // Externs
 //
@@ -34,8 +35,12 @@ BOOL OALIoCtlHalGetHardwarePtrs(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 								 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
 // Function prototype for our IOCTL_HAL_DDI handler function, implemented in ddi.c
-BOOL OALIoctlHalDdi(UINT32 code, VOID *pInpBuffer, UINT32 inpSize, 
+BOOL OALIoctlHalDdi(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 					VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
+// Returns the VideoCore EMMC base clock in Hz (for the SD host driver).
+BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
 //------------------------------------------------------------------------------
 //
@@ -64,7 +69,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 //{ IOCTL_HAL_ENABLE_WAKE,                    0,  OALIoCtlHalEnableWake       },
 //{ IOCTL_HAL_GET_WAKE_SOURCE,                0,  OALIoCtlHalGetWakeSource    },
 //
-//{ IOCTL_HAL_GET_CACHE_INFO,                 0,  OALIoCtlHalGetCacheInfo     },
+{ IOCTL_HAL_GET_CACHE_INFO,                 0,  OALIoCtlHalGetCacheInfo     },
 //{ IOCTL_HAL_GET_DEVICEID,                   0,  OALIoCtlHalGetDeviceId      },
 //{ IOCTL_HAL_GET_DEVICE_INFO,                0,  OALIoCtlHalGetDeviceInfo    },
 //{ IOCTL_HAL_GET_UUID,                       0,  OALIoCtlHalGetUUID          },
@@ -88,6 +93,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 // (db) Added these for the RASPI port
 { IOCTL_HAL_SET_KITL_SERIAL_BUFFERS,          0,  OALIoCtlHalSetKitlSerBuffs     },
 { IOCTL_HAL_MY_GET_HARDWARE_POINTERS,         0,  OALIoCtlHalGetHardwarePtrs     },
+{ IOCTL_HAL_MY_GET_EMMC_CLOCK,                0,  OALIoCtlHalGetEmmcClock        },
 { IOCTL_HAL_DDI,                              0,  OALIoctlHalDdi   },
 
 // Required Termination
@@ -496,4 +502,88 @@ BOOL OALIoCtlHalGetHardwarePtrs(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 	}
 	//NKDbgPrintfW(L"OALIoCtlHalGetHardwarePtrs-- rc %d\r\n", fRC);
     return fRC;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  OALIoCtlHalGetEmmcClock
+//
+//  Implements IOCTL_HAL_MY_GET_EMMC_CLOCK. Returns the VideoCore EMMC base
+//  clock in Hz (a single DWORD in the output buffer). The SD host driver needs
+//  this because the BCM2835 Arasan capabilities register reads 0, so the base
+//  clock cannot be read from the controller. We ask the VideoCore over the
+//  property mailbox ("get clock rate", clock id = EMMC), reusing the OAL's
+//  mailbox primitives. CACHE_SYNC_* and OEMCacheRangeFlush come from the
+//  already-included nkintr.h / oemglobal.h.
+//
+#define RASPI_PROPTAG_GET_CLOCK_RATE   0x00030002
+#define RASPI_CLOCK_ID_EMMC            0x00000001
+#define RASPI_PROPERTY_RESPONSE_OK     0x80000000
+
+BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	volatile DWORD *pBuff = 0;
+	DWORD dwBuffSize = 0;
+	DWORD dwResp = 0;
+	DWORD dwRate = 0;
+	int rc;
+
+	UNREFERENCED_PARAMETER(code);
+	UNREFERENCED_PARAMETER(pInpBuffer);
+	UNREFERENCED_PARAMETER(inpSize);
+
+	if ((pOutBuffer == 0) || (outSize < sizeof(DWORD)))
+		return FALSE;
+
+	// Shared property-mailbox buffer. TRUE returns its virtual address, which is
+	// numerically the VideoCore L2 bus alias (0x8000xxxx) of the physical page,
+	// so the same value serves both the CPU write and the address handed to the
+	// GPU (>>4) - the pattern the framebuffer mailbox path already relies on.
+	if (MailboxGetMailboxBuffer(TRUE, (DWORD *)&pBuff, &dwBuffSize) != 0)
+		return FALSE;
+	if ((pBuff == 0) || (dwBuffSize < 8 * sizeof(DWORD)))
+		return FALSE;
+
+	// Build the property request: get clock rate for the EMMC clock.
+	//   [0] total buffer size        [4] tag request/response code (0)
+	//   [1] request code (0)         [5] value[0] = clock id (EMMC)
+	//   [2] tag id                   [6] value[1] = rate (filled by VideoCore)
+	//   [3] value buffer size (8)    [7] end tag (0)
+	pBuff[0] = 8 * sizeof(DWORD);
+	pBuff[1] = 0x00000000;
+	pBuff[2] = RASPI_PROPTAG_GET_CLOCK_RATE;
+	pBuff[3] = 2 * sizeof(DWORD);
+	pBuff[4] = 0x00000000;
+	pBuff[5] = RASPI_CLOCK_ID_EMMC;
+	pBuff[6] = 0x00000000;
+	pBuff[7] = 0x00000000;
+
+	// Clean the buffer so the VideoCore reads our request from RAM. The lines
+	// are then clean, so the invalidate after the call will not write stale
+	// request data back over the GPU's response.
+	OEMCacheRangeFlush((VOID *)pBuff, 8 * sizeof(DWORD), CACHE_SYNC_WRITEBACK);
+
+	rc = MailboxSendMail(0, MAILBOX_CHAN_PROPARM2VC, ((DWORD)pBuff) >> 4);
+	if (rc == 0)
+		rc = MailboxGetMail(0, MAILBOX_CHAN_PROPARM2VC, &dwResp);
+	if (rc != 0)
+		return FALSE;
+
+	// Drop the (clean) cache lines so the reads below come from RAM = the
+	// VideoCore's response, not our cached copy of the request.
+	OEMCacheRangeFlush((VOID *)pBuff, 8 * sizeof(DWORD), CACHE_SYNC_DISCARD);
+
+	// Both the overall response code and the tag's response bit must say OK.
+	if ((pBuff[1] != RASPI_PROPERTY_RESPONSE_OK) ||
+		((pBuff[4] & RASPI_PROPERTY_RESPONSE_OK) == 0))
+		return FALSE;
+
+	dwRate = pBuff[6];              // clock rate in Hz
+
+	*(DWORD *)pOutBuffer = dwRate;
+	if (pOutSize != 0)
+		*pOutSize = sizeof(DWORD);
+
+	return (dwRate != 0);
 }

@@ -1,0 +1,17 @@
+;
+; BCM2835 SD host controller driver. The SHC_* stream entry points come from
+; the MDD (SDHCBase.lib); CreateSDHCBcmObject is this PDD's controller factory,
+; named by the registry "ObjectCreationProc" value.
+;
+LIBRARY         SDHCBCM
+
+EXPORTS
+                SHC_Init
+                SHC_PreDeinit
+                SHC_Deinit
+                SHC_Open
+                SHC_Close
+                SHC_IOControl
+                SHC_PowerDown
+                SHC_PowerUp
+                CreateSDHCBcmObject
