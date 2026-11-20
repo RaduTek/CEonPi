@@ -830,7 +830,7 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING Registry
     NDIS_MINIPORT_CHARACTERISTICS mc;
     NDIS_STATUS st;
 
-    SMSCINIT((TEXT("SMSC95XX: DriverEntry\r\n")));
+    SMSCINFO((TEXT("SMSC95XX: DriverEntry\r\n")));
 
     NdisMInitializeWrapper(&s_hWrapper, DriverObject, RegistryPath, NULL);
     if (s_hWrapper == NULL)

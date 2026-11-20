@@ -216,7 +216,7 @@ static BOOL SmscFindEndpoints(PSMSC_ADAPTER pAd)
     UCHAR bType;
     BOOL fIn;
 
-    SMSCINIT((TEXT("SMSC95XX: interface %u alt %u class %02x/%02x/%02x, %u endpoints\r\n"),
+    SMSCINFO((TEXT("SMSC95XX: interface %u alt %u class %02x/%02x/%02x, %u endpoints\r\n"),
               pIf->Descriptor.bInterfaceNumber, pIf->Descriptor.bAlternateSetting,
               pIf->Descriptor.bInterfaceClass, pIf->Descriptor.bInterfaceSubClass,
               pIf->Descriptor.bInterfaceProtocol, pIf->Descriptor.bNumEndpoints));
@@ -227,7 +227,7 @@ static BOOL SmscFindEndpoints(PSMSC_ADAPTER pAd)
         bType = pEp->bmAttributes & USB_ENDPOINT_TYPE_MASK;
         fIn = (pEp->bEndpointAddress & USB_ENDPOINT_DIRECTION_MASK) != 0;
 
-        SMSCINIT((TEXT("SMSC95XX:   ep 0x%02x type %u maxpkt %u interval %u\r\n"),
+        SMSCINFO((TEXT("SMSC95XX:   ep 0x%02x type %u maxpkt %u interval %u\r\n"),
                   pEp->bEndpointAddress, bType, pEp->wMaxPacketSize, pEp->bInterval));
 
         if (bType == USB_ENDPOINT_TYPE_BULK && fIn && !pAd->fBulkIn)
@@ -265,7 +265,7 @@ static void SmscProbeDump(PSMSC_ADAPTER pAd)
     for (i = 0; i < sizeof(s_adwRegs) / sizeof(s_adwRegs[0]); i++)
     {
         if (SmscReadReg(pAd, s_adwRegs[i], &dwVal))
-            SMSCINIT((TEXT("SMSC95XX:   reg 0x%03x = 0x%08x\r\n"), s_adwRegs[i], dwVal));
+            SMSCINFO((TEXT("SMSC95XX:   reg 0x%03x = 0x%08x\r\n"), s_adwRegs[i], dwVal));
         else
             SMSCERR((TEXT("SMSC95XX:   reg 0x%03x read FAILED\r\n"), s_adwRegs[i]));
     }
@@ -281,13 +281,13 @@ static void SmscProbeDump(PSMSC_ADAPTER pAd)
     for (i = MII_BMCR; i <= MII_ANLPAR; i++)
     {
         if (SmscMiiRead(pAd, i, &wVal))
-            SMSCINIT((TEXT("SMSC95XX:   phy %u = 0x%04x\r\n"), i, wVal));
+            SMSCINFO((TEXT("SMSC95XX:   phy %u = 0x%04x\r\n"), i, wVal));
         else
             SMSCERR((TEXT("SMSC95XX:   phy %u read FAILED\r\n"), i));
     }
     if (SmscMiiRead(pAd, MII_BMSR, &wBmsr2))
     {
-        SMSCINIT((TEXT("SMSC95XX: link %s, autoneg %s (BMSR 0x%04x)\r\n"),
+        SMSCINFO((TEXT("SMSC95XX: link %s, autoneg %s (BMSR 0x%04x)\r\n"),
                   (wBmsr2 & MII_BMSR_LINK) ? TEXT("UP") : TEXT("down"),
                   (wBmsr2 & MII_BMSR_ANEG_COMPLETE) ? TEXT("complete") : TEXT("not complete"),
                   wBmsr2));
@@ -379,12 +379,16 @@ BOOL USBDeviceAttach(USB_HANDLE hDevice, LPCUSB_FUNCS lpUsbFuncs,
         return FALSE;
     }
 
-    SMSCINIT((TEXT("SMSC95XX: bulk in 0x%02x (%u), bulk out 0x%02x (%u), intr in 0x%02x\r\n"),
+    SMSCINFO((TEXT("SMSC95XX: bulk in 0x%02x (%u), bulk out 0x%02x (%u), intr in 0x%02x\r\n"),
               pAd->epBulkIn.bEndpointAddress, pAd->epBulkIn.wMaxPacketSize,
               pAd->epBulkOut.bEndpointAddress, pAd->epBulkOut.wMaxPacketSize,
               pAd->epIntrIn.bEndpointAddress));
 
-    SmscProbeDump(pAd);
+#ifdef DEBUG
+    // Reset-state register dump (~25 control transfers): Info zone only.
+    if (DEBUGZONE(ZONEID_INFO))
+        SmscProbeDump(pAd);
+#endif
 
     if (!SmscStart(pAd))
     {
@@ -408,7 +412,7 @@ BOOL USBDeviceAttach(USB_HANDLE hDevice, LPCUSB_FUNCS lpUsbFuncs,
         SMSCERR((TEXT("SMSC95XX: NDIS attach failed, no network adapter\r\n")));
 
     *fAcceptControl = TRUE;
-    SMSCINIT((TEXT("SMSC95XX: started\r\n")));
+    SMSCINFO((TEXT("SMSC95XX: started\r\n")));
     return TRUE;
 }
 

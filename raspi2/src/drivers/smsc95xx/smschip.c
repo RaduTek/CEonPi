@@ -9,9 +9,10 @@
 // threads run for as long as the device is attached:
 // - RX thread: keeps two bulk-IN transfers queued, splits each completed
 //   transfer into frames and hands them to NDIS (SmscNdisIndicateRx);
-// - link thread: interrupt endpoint (PHY interrupt) plus a 1 s BMSR poll as
-//   a fallback, applies receive filter changes requested by NDIS, and logs
-//   the statistics every SMSC_STATS_INTERVAL ms when they changed;
+// - link thread: polls BMSR every SMSC_LINK_POLL_MS (the interrupt endpoint
+//   is not used, see smsc.h), applies receive filter changes requested by
+//   NDIS, and logs the statistics every SMSC_STATS_INTERVAL ms when they
+//   changed (Info zone);
 // - TX thread (smscndis.c): bulk OUT.
 //
 // The init sequence follows FreeBSD if_smsc.c smsc_chip_init/smsc_phy_init
@@ -132,11 +133,7 @@ static BOOL SmscPhyInit(PSMSC_ADAPTER pAd)
                       MII_ANAR_100_HD | MII_ANAR_100_FD | MII_ANAR_CSMA))
         return FALSE;
 
-    // Clear pending PHY interrupts, then interrupt on autoneg done / link down.
-    SmscMiiRead(pAd, SMSC_PHY_INTR_STAT, &wVal);
-    if (!SmscMiiWrite(pAd, SMSC_PHY_INTR_MASK,
-                      SMSC_PHY_INTR_ANEG_COMP | SMSC_PHY_INTR_LINK_DOWN))
-        return FALSE;
+    // The link is polled (BMSR), so PHY interrupts stay masked (reset default).
 
     // Restart autonegotiation.
     if (!SmscMiiRead(pAd, MII_BMCR, &wVal))
@@ -218,8 +215,8 @@ BOOL SmscChipInit(PSMSC_ADAPTER pAd)
         return FALSE;
     }
 
-    // Report PHY interrupts on the interrupt endpoint.
-    if (!SmscWriteReg(pAd, SMSC_INTR_CFG, SMSC_INTR_PHY_INT))
+    // Nothing is reported on the interrupt endpoint (link is polled).
+    if (!SmscWriteReg(pAd, SMSC_INTR_CFG, 0))
         return FALSE;
 
     // Enable TX then RX.
@@ -232,7 +229,7 @@ BOOL SmscChipInit(PSMSC_ADAPTER pAd)
         return FALSE;
 
     if (SmscReadReg(pAd, SMSC_HW_CFG, &dwVal))
-        SMSCINIT((TEXT("SMSC95XX: init done, HW_CFG=0x%08x MAC_CSR=0x%08x\r\n"),
+        SMSCINFO((TEXT("SMSC95XX: init done, HW_CFG=0x%08x MAC_CSR=0x%08x\r\n"),
                   dwVal, pAd->dwMacCsr));
     return TRUE;
 }
@@ -270,7 +267,7 @@ static void SmscApplyFilter(PSMSC_ADAPTER pAd)
         pAd->dwMacCsr = dwCsr;
         SmscWriteReg(pAd, SMSC_MAC_CSR, dwCsr);
     }
-    SMSCINIT((TEXT("SMSC95XX: filter 0x%x -> MAC_CSR 0x%08x HASH %08x:%08x\r\n"),
+    SMSCINFO((TEXT("SMSC95XX: filter 0x%x -> MAC_CSR 0x%08x HASH %08x:%08x\r\n"),
               dwFilter, dwCsr, dwHashH, dwHashL));
 }
 
@@ -279,12 +276,10 @@ static void SmscApplyFilter(PSMSC_ADAPTER pAd)
 //------------------------------------------------------------------------------
 static void SmscCheckLink(PSMSC_ADAPTER pAd)
 {
-    WORD wIntr = 0, wBmsr = 0, wBmcr = 0, wAdv = 0, wLpa = 0, wCommon;
+    WORD wBmsr = 0, wBmcr = 0, wAdv = 0, wLpa = 0, wCommon;
     BOOL fUp;
 
-    // Reading the PHY interrupt source clears it. BMSR link latches low:
-    // read it twice for the current state.
-    SmscMiiRead(pAd, SMSC_PHY_INTR_STAT, &wIntr);
+    // BMSR link latches low: read it twice for the current state.
     if (!SmscMiiRead(pAd, MII_BMSR, &wBmsr) || !SmscMiiRead(pAd, MII_BMSR, &wBmsr))
         return;
 
@@ -337,50 +332,35 @@ static void SmscCheckLink(PSMSC_ADAPTER pAd)
     SmscNdisLinkChanged(pAd, TRUE);
 }
 
-static BOOL SmscQueueIntr(PSMSC_ADAPTER pAd)
-{
-    DWORD cb = pAd->epIntrIn.wMaxPacketSize;
-
-    if (cb == 0 || cb > sizeof(pAd->abIntr))
-        cb = sizeof(pAd->abIntr);
-    ResetEvent(pAd->hIntrEvent);
-    pAd->hIntrXfer = pAd->pUsbFuncs->lpIssueInterruptTransfer(pAd->hPipeIntr, SmscXferSignal,
-                                                              pAd->hIntrEvent,
-                                                              USB_IN_TRANSFER | USB_SHORT_TRANSFER_OK,
-                                                              cb, pAd->abIntr, 0);
-    return pAd->hIntrXfer != NULL;
-}
-
 static void SmscLogStats(PSMSC_ADAPTER pAd)
 {
-    SMSCINIT((TEXT("SMSC95XX: rx %u (%u bytes) ind %u drop %u nobuf %u err %u badlen %u xfererr %u; tx %u err %u\r\n"),
+    SMSCINFO((TEXT("SMSC95XX: rx %u (%u bytes) ind %u drop %u nobuf %u err %u badlen %u xfererr %u; tx %u err %u\r\n"),
               pAd->dwRxFrames, pAd->dwRxBytes, pAd->dwRxIndicated, pAd->dwRxDropped,
               pAd->dwRxNoBuffer, pAd->dwRxErrors, pAd->dwRxBadLen, pAd->dwRxXferErrors,
               pAd->dwTxFrames, pAd->dwTxErrors));
 }
 
-// Link thread: interrupt endpoint (PHY interrupt), 1 s BMSR poll as a
-// fallback, receive filter changes, and the periodic statistics line.
+// Link thread: BMSR poll every SMSC_LINK_POLL_MS, receive filter changes
+// requested by NDIS, and the periodic statistics line (Info zone).
 static DWORD WINAPI SmscLinkThread(LPVOID lpv)
 {
     PSMSC_ADAPTER pAd = (PSMSC_ADAPTER)lpv;
-    HANDLE ah[3];
-    DWORD dwWait, dwBytes, dwUsbErr, dwIntr, dwTicks = 0, dwIntrErrors = 0;
+    HANDLE ah[2];
+    DWORD dwWait, dwNow, dwNextPoll, dwNextStats, dwTimeout;
     DWORD dwLastRx = 0, dwLastTx = 0, dwLastErr = 0;
-    BOOL fIntrLogged = FALSE;
-
-    if (!SmscQueueIntr(pAd))
-        SMSCWARN((TEXT("SMSC95XX: interrupt transfer not issued, polling link only\r\n")));
 
     SmscCheckLink(pAd);
 
     ah[0] = pAd->hStopEvent;
     ah[1] = pAd->hFilterEvent;
-    ah[2] = pAd->hIntrEvent;
+    dwNextPoll = GetTickCount() + SMSC_LINK_POLL_MS;
+    dwNextStats = GetTickCount() + SMSC_STATS_INTERVAL;
 
     for (;;)
     {
-        dwWait = WaitForMultipleObjects(pAd->hIntrXfer ? 3 : 2, ah, FALSE, 1000);
+        dwNow = GetTickCount();
+        dwTimeout = ((LONG)(dwNextPoll - dwNow) > 0) ? (dwNextPoll - dwNow) : 0;
+        dwWait = WaitForMultipleObjects(2, ah, FALSE, dwTimeout);
         if (dwWait == WAIT_OBJECT_0 || pAd->fClosing)
             break;
 
@@ -390,44 +370,13 @@ static DWORD WINAPI SmscLinkThread(LPVOID lpv)
             continue;
         }
 
-        if (dwWait == WAIT_OBJECT_0 + 2)
-        {
-            dwBytes = 0;
-            dwUsbErr = USB_NO_ERROR;
-            pAd->pUsbFuncs->lpGetTransferStatus(pAd->hIntrXfer, &dwBytes, &dwUsbErr);
-            pAd->pUsbFuncs->lpCloseTransfer(pAd->hIntrXfer);
-            pAd->hIntrXfer = NULL;
-
-            if (dwUsbErr == USB_NO_ERROR && dwBytes >= 4)
-            {
-                memcpy(&dwIntr, pAd->abIntr, 4);
-                if (!fIntrLogged)
-                {
-                    SMSCINIT((TEXT("SMSC95XX: interrupt endpoint alive, data 0x%08x\r\n"), dwIntr));
-                    fIntrLogged = TRUE;
-                }
-                SmscWriteReg(pAd, SMSC_INTR_STATUS, 0xFFFFFFFF);
-                if (dwIntr & SMSC_INTR_PHY_INT)
-                    SmscCheckLink(pAd);
-            }
-            else if (++dwIntrErrors <= 3)
-            {
-                SMSCWARN((TEXT("SMSC95XX: interrupt transfer failed, usberr=0x%x bytes=%u\r\n"),
-                          dwUsbErr, dwBytes));
-                Sleep(100);
-            }
-
-            if (!pAd->fClosing && dwIntrErrors < 100)
-                SmscQueueIntr(pAd);
-            continue;
-        }
-
-        // 1 s tick: poll the link, and log the statistics every 5 s if changed.
+        // Poll tick.
         SmscCheckLink(pAd);
-        dwTicks += 1000;
-        if (dwTicks >= SMSC_STATS_INTERVAL)
+        dwNextPoll = GetTickCount() + SMSC_LINK_POLL_MS;
+
+        if ((LONG)(GetTickCount() - dwNextStats) >= 0)
         {
-            dwTicks = 0;
+            dwNextStats = GetTickCount() + SMSC_STATS_INTERVAL;
             if (pAd->dwRxFrames != dwLastRx || pAd->dwTxFrames != dwLastTx ||
                 pAd->dwRxXferErrors + pAd->dwTxErrors + pAd->dwRxNoBuffer != dwLastErr)
             {
@@ -437,14 +386,6 @@ static DWORD WINAPI SmscLinkThread(LPVOID lpv)
                 SmscLogStats(pAd);
             }
         }
-    }
-
-    if (pAd->hIntrXfer != NULL)
-    {
-        pAd->pUsbFuncs->lpAbortTransfer(pAd->hIntrXfer, 0);
-        WaitForSingleObject(pAd->hIntrEvent, 500);
-        pAd->pUsbFuncs->lpCloseTransfer(pAd->hIntrXfer);
-        pAd->hIntrXfer = NULL;
     }
     return 0;
 }
@@ -603,10 +544,9 @@ BOOL SmscStart(PSMSC_ADAPTER pAd)
     DWORD i;
 
     pAd->hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-    pAd->hIntrEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
     pAd->hFilterEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     pAd->hTxQueueEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!pAd->hStopEvent || !pAd->hIntrEvent || !pAd->hFilterEvent || !pAd->hTxQueueEvent)
+    if (!pAd->hStopEvent || !pAd->hFilterEvent || !pAd->hTxQueueEvent)
         return FALSE;
 
     for (i = 0; i < SMSC_RX_BUFFERS; i++)
@@ -626,11 +566,10 @@ BOOL SmscStart(PSMSC_ADAPTER pAd)
 
     pAd->hPipeIn = f->lpOpenPipe(pAd->hDevice, &pAd->epBulkIn);
     pAd->hPipeOut = f->lpOpenPipe(pAd->hDevice, &pAd->epBulkOut);
-    pAd->hPipeIntr = f->lpOpenPipe(pAd->hDevice, &pAd->epIntrIn);
-    if (!pAd->hPipeIn || !pAd->hPipeOut || !pAd->hPipeIntr)
+    if (!pAd->hPipeIn || !pAd->hPipeOut)
     {
-        SMSCERR((TEXT("SMSC95XX: OpenPipe failed (in 0x%x out 0x%x intr 0x%x)\r\n"),
-                 (DWORD)pAd->hPipeIn, (DWORD)pAd->hPipeOut, (DWORD)pAd->hPipeIntr));
+        SMSCERR((TEXT("SMSC95XX: OpenPipe failed (in 0x%x out 0x%x)\r\n"),
+                 (DWORD)pAd->hPipeIn, (DWORD)pAd->hPipeOut));
         return FALSE;
     }
 
@@ -645,6 +584,10 @@ BOOL SmscStart(PSMSC_ADAPTER pAd)
         SMSCERR((TEXT("SMSC95XX: cannot create worker threads\r\n")));
         return FALSE;
     }
+
+    // Data path above normal applications; the link thread stays normal.
+    CeSetThreadPriority(pAd->hRxThread, SMSC_DATA_THREAD_PRIORITY);
+    CeSetThreadPriority(pAd->hTxThread, SMSC_DATA_THREAD_PRIORITY);
     return TRUE;
 }
 
@@ -672,8 +615,6 @@ void SmscStop(PSMSC_ADAPTER pAd)
     // Complete anything pending so the threads see their events.
     if (pAd->hPipeIn)
         f->lpAbortPipeTransfers(pAd->hPipeIn, 0);
-    if (pAd->hPipeIntr)
-        f->lpAbortPipeTransfers(pAd->hPipeIntr, 0);
     if (pAd->hPipeOut)
         f->lpAbortPipeTransfers(pAd->hPipeOut, 0);
 
@@ -685,9 +626,7 @@ void SmscStop(PSMSC_ADAPTER pAd)
         f->lpClosePipe(pAd->hPipeIn);
     if (pAd->hPipeOut)
         f->lpClosePipe(pAd->hPipeOut);
-    if (pAd->hPipeIntr)
-        f->lpClosePipe(pAd->hPipeIntr);
-    pAd->hPipeIn = pAd->hPipeOut = pAd->hPipeIntr = NULL;
+    pAd->hPipeIn = pAd->hPipeOut = NULL;
 
     for (i = 0; i < SMSC_RX_BUFFERS; i++)
     {
@@ -709,11 +648,9 @@ void SmscStop(PSMSC_ADAPTER pAd)
     }
     if (pAd->hStopEvent)
         CloseHandle(pAd->hStopEvent);
-    if (pAd->hIntrEvent)
-        CloseHandle(pAd->hIntrEvent);
     if (pAd->hFilterEvent)
         CloseHandle(pAd->hFilterEvent);
     if (pAd->hTxQueueEvent)
         CloseHandle(pAd->hTxQueueEvent);
-    pAd->hStopEvent = pAd->hIntrEvent = pAd->hFilterEvent = pAd->hTxQueueEvent = NULL;
+    pAd->hStopEvent = pAd->hFilterEvent = pAd->hTxQueueEvent = NULL;
 }
