@@ -18,9 +18,11 @@ makefile     text eol=crlf
 *.pbxml      text eol=crlf
 *.pbcxml     text eol=crlf
 *.html       text eol=crlf
+*.rc         text eol=crlf
 platform.db  text eol=crlf
 OSDesign.db  text eol=crlf
 # Binary files: never touch
 *.bmp        binary
+*.ico        binary
 *.suo        binary
 Thumbs.db    binary

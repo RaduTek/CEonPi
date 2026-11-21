@@ -42,6 +42,10 @@ BOOL OALIoctlHalDdi(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
+// Resets the board through the PM watchdog; never returns (power.c).
+BOOL OALIoCtlHalReboot(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+					   VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
 //------------------------------------------------------------------------------
 //
 //  Global: g_MyoalIoCtlTable[]
@@ -61,7 +65,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 //
 { IOCTL_HAL_INITREGISTRY,                   0,  OALIoCtlHalInitRegistry     },
 //{ IOCTL_HAL_INIT_RTC,                       0,  OALIoCtlHalInitRTC          },
-//{ IOCTL_HAL_REBOOT,                         0,  OALIoCtlHalReboot           },
+{ IOCTL_HAL_REBOOT,       OAL_IOCTL_FLAG_NOCS,  OALIoCtlHalReboot           },
 //
 //{ IOCTL_HAL_DDK_CALL,                       0,  OALIoCtlHalDdkCall          },
 //

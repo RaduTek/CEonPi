@@ -69,8 +69,16 @@ ENDIF BSP_NODISPLAY !
 
 ; This registry setting controls display of the Explorer's suspend menu button
 ; To enable display of that button, comment out the next two lines.
-[HKEY_LOCAL_MACHINE\Explorer]
-    "Suspend"=dword:0
+; Enabled: on this BSP Suspend is the shutdown (OEMPowerOff halts the board
+; through the firmware, see src\oal\oallib\power.c).
+;[HKEY_LOCAL_MACHINE\Explorer]
+;    "Suspend"=dword:0
+
+; Never suspend on idle: Suspend halts the board (shutdown) on this BSP, so
+; the power manager must not enter it by itself. 0 = never.
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Power\Timeouts]
+    "ACSuspendTimeout"=dword:0
+    "BattSuspendTimeout"=dword:0
 
 
 ; USB - DesignWare OTG (DWC2) USB host controller driver (src\drivers\dwchci)

@@ -1,0 +1,23 @@
+//
+// poweroff.rc - resources for poweroff.exe (src\apps\poweroff)
+//
+// The icon is the first (and only) icon resource, so the shell uses it as
+// the application icon (desktop shortcut, taskbar).
+//
+#include <windows.h>
+#include "resource.h"
+
+IDI_POWEROFF    ICON    "poweroff.ico"
+
+IDD_POWEROFF DIALOG 0, 0, 200, 72
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Shut Down"
+FONT 8, "Tahoma"
+BEGIN
+    ICON            IDI_POWEROFF, IDC_STATIC, 8, 8, 21, 20
+    LTEXT           "Restart the device, or power it off?\n\nAfter power off, unplug and replug the power to start it again.",
+                    IDC_LABEL, 38, 8, 154, 38
+    PUSHBUTTON      "&Restart", IDC_RESET, 8, 52, 56, 14
+    PUSHBUTTON      "&Power off", IDC_POWEROFF, 72, 52, 56, 14
+    DEFPUSHBUTTON   "Cancel", IDCANCEL, 136, 52, 56, 14
+END

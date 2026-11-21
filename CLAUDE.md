@@ -251,14 +251,35 @@ ARM1176.
     `OALIoCtlHalGetCacheInfo` over `g_oalCacheInfo`. It was broken (returned FALSE -> `CeGetCacheInfo`
     failed), which a future DMA path would need; it is harmless to PIO.
 
-## Power: idle (2026-11-21)
+## Power: idle, restart, shutdown (2026-11-21)
 - **Idle:** `OEMIdle` (`src\oal\oallib\power.c`) does drain-write-buffer + CP15 WFI
   (`RaspiCpuWaitForInterrupt` in `startup.s`). It accumulates `curridlehigh:curridlelow` in 1 us
   system-timer counts, with `idleconv`=1000, so `GetIdleTime()` is in ms. Verified: builds, boots,
   and a power meter shows a small drop at idle.
+- **Restart / shutdown (verified on a Pi 1 Model B):** both go through the PM watchdog block at
+  `0x20100000`.
+  - Verified: a file copied USB -> SD before Suspend survived the halt (checksum matched; the
+    kernel logs `FSREG: Flushing registry` / `FSRAM: Flushing cached file data` before
+    `Calling OEMPowerOff...`). Restart and Power off from `poweroff.exe` work. The board stays up
+    when idle for more than 5 minutes.
+  - `OEMPowerOff`'s own log line never shows: KITL is already powered down by then. The kernel's
+    `Calling OEMPowerOff...` is the last line before the halt.
+  - Registers: `RSTC` +0x1C, `RSTS` +0x20, `WDOG` +0x24, password `0x5A000000`; constants in
+    `BCM2835.h`.
+  - `OALRaspiWatchdogReset(fHalt)` arms `WDOG`=10 ticks and sets `RSTC` to full reset.
+  - With `fHalt` it first ORs `0x555` (partition 63) into `RSTS`, so `bootcode.bin` halts instead
+    of booting.
+  - `IOCTL_HAL_REBOOT` -> `OALIoCtlHalReboot` (table flag `OAL_IOCTL_FLAG_NOCS`, never returns) =
+    restart.
+  - `OEMPowerOff` = halt, so **Suspend is the shutdown** on this BSP. The Explorer Suspend button is
+    re-enabled in `platform.reg`, and `ACSuspendTimeout`/`BattSuspendTimeout` are set to 0 so the PM
+    never suspends (halts) on idle.
 - **Optional apps** (`src\apps`, always built, put in the image by a `BSP_` variable / BSP catalog
   item, each with a desktop shortcut through `files\*.lnk` + `platform.dat`):
   - `idlemon.exe` (`BSP_IDLEMON`): CPU load / idle % / `GetIdleTime()`.
+  - `poweroff.exe` (`BSP_POWEROFF`): resource dialog with Restart (`SetSystemPowerState`
+    `POWER_STATE_RESET`, falling back to `IOCTL_HAL_REBOOT`) / Power off (`POWER_STATE_SUSPEND`) /
+    Cancel.
 - CE has no `FrameRect`. Use `Rectangle` with `NULL_BRUSH`.
 
 ## Reference code

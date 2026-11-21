@@ -24,6 +24,7 @@
     <BspItemId>Item:Boling Consulting Inc.:TutorialKitlEthernetPlatformCommon:BSPTemplate_raspi2</BspItemId>
     <BspItemId>Item:Boling Consulting Inc.:TutorialHALFlatDisplayDriver:BSPTemplate_raspi2</BspItemId>
     <BspItemId>Item:CEonPi:IdleMon:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:PowerOff:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:Boling Consulting Inc.:BSPTemplateInstructions:BSPTemplate_raspi2">
     <Title>!BSP Template Instructions - Start Here!</Title>
@@ -56,6 +57,17 @@
     <SourceCode>
       <Title>CPU IDLE MONITOR SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\IDLEMON</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:PowerOff:raspi2">
+    <Title>Shut Down dialog (poweroff.exe)</Title>
+    <Description>Dialog with Restart, Power off and Cancel buttons, with a desktop shortcut. Sets BSP_POWEROFF=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_POWEROFF</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>SHUT DOWN DIALOG SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\POWEROFF</Path>
     </SourceCode>
   </Item>
 </CatalogFile>

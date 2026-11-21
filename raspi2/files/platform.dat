@@ -18,3 +18,8 @@
 IF BSP_IDLEMON
 Directory("\Windows\Desktop"):-File("CPU Idle Monitor.lnk","\Windows\idlemon.lnk")
 ENDIF BSP_IDLEMON
+
+; Shut Down dialog: desktop shortcut (optional, BSP_POWEROFF=1)
+IF BSP_POWEROFF
+Directory("\Windows\Desktop"):-File("Shut Down.lnk","\Windows\poweroff.lnk")
+ENDIF BSP_POWEROFF

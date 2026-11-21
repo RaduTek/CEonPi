@@ -43,3 +43,10 @@ rem image, with a desktop shortcut. The catalog item "CPU Idle Monitor (demo)"
 rem sets the same variable.
 rem
 rem set BSP_IDLEMON=1
+
+rem
+rem BSP_POWEROFF=1 adds the Shut Down dialog (src\apps\poweroff: Restart /
+rem Power off / Cancel) to the image, with a desktop shortcut. The catalog
+rem item "Shut Down dialog (poweroff.exe)" sets the same variable.
+rem
+rem set BSP_POWEROFF=1
