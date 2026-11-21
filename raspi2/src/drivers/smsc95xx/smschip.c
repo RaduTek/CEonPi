@@ -332,22 +332,104 @@ static void SmscCheckLink(PSMSC_ADAPTER pAd)
     SmscNdisLinkChanged(pAd, TRUE);
 }
 
-static void SmscLogStats(PSMSC_ADAPTER pAd)
+//------------------------------------------------------------------------------
+// Statistics and CPU-load probe (Info zone, Debug builds)
+//
+// The OAL's OEMIdle is a stub, so CE has no idle-time accounting. To see how
+// busy the CPU is, a thread at the lowest priority (255) counts in a loop: it
+// only runs when nothing else wants the CPU. busy% = 100 - 100 * (counts per
+// ms now) / (highest counts per ms seen), so the estimate is only as good as
+// the quietest interval observed since the probe started. The probe starts
+// when the Info zone is first seen on and runs until the device closes.
+//------------------------------------------------------------------------------
+typedef struct _SMSC_STATS_SNAP
 {
-    SMSCINFO((TEXT("SMSC95XX: rx %u (%u bytes) ind %u drop %u nobuf %u err %u badlen %u xfererr %u; tx %u err %u\r\n"),
-              pAd->dwRxFrames, pAd->dwRxBytes, pAd->dwRxIndicated, pAd->dwRxDropped,
-              pAd->dwRxNoBuffer, pAd->dwRxErrors, pAd->dwRxBadLen, pAd->dwRxXferErrors,
-              pAd->dwTxFrames, pAd->dwTxErrors));
+    DWORD   dwTick;
+    DWORD   dwRxBytes, dwTxBytes, dwRxFrames, dwTxFrames, dwRxXfers, dwTxXfers;
+    DWORD   dwErr;
+    DWORD   dwIdle;
+    DWORD   dwIdleMaxPerMs;
+} SMSC_STATS_SNAP;
+
+#ifdef DEBUG
+static DWORD WINAPI SmscIdleThread(LPVOID lpv)
+{
+    PSMSC_ADAPTER pAd = (PSMSC_ADAPTER)lpv;
+
+    while (!pAd->fClosing)
+        pAd->dwIdleCount++;
+    return 0;
+}
+#endif
+
+static void SmscLogStats(PSMSC_ADAPTER pAd, SMSC_STATS_SNAP *pLast)
+{
+    DWORD dwNow = GetTickCount();
+    DWORD dt = dwNow - pLast->dwTick;
+    DWORD rxB, txB, rxF, txF, rxX, txX, dwErr, dwIdlePerMs, dwBusy, dwFpx, dwTpx;
+
+    if (dt == 0)
+        dt = 1;
+    rxB = pAd->dwRxBytes - pLast->dwRxBytes;
+    txB = pAd->dwTxBytes - pLast->dwTxBytes;
+    rxF = pAd->dwRxFrames - pLast->dwRxFrames;
+    txF = pAd->dwTxFrames - pLast->dwTxFrames;
+    rxX = pAd->dwRxXfers - pLast->dwRxXfers;
+    txX = pAd->dwTxXfers - pLast->dwTxXfers;
+    dwErr = pAd->dwRxXferErrors + pAd->dwTxErrors + pAd->dwRxNoBuffer +
+            pAd->dwRxErrors + pAd->dwRxBadLen;
+
+#ifdef DEBUG
+    if (pAd->hIdleThread == NULL && DEBUGZONE(ZONEID_INFO) && !pAd->fClosing)
+    {
+        pAd->hIdleThread = CreateThread(NULL, 0, SmscIdleThread, pAd, 0, NULL);
+        if (pAd->hIdleThread != NULL)
+            CeSetThreadPriority(pAd->hIdleThread, 255);
+        pLast->dwIdle = pAd->dwIdleCount;
+    }
+#endif
+
+    dwIdlePerMs = (pAd->dwIdleCount - pLast->dwIdle) / dt;
+    if (dwIdlePerMs > pLast->dwIdleMaxPerMs)
+        pLast->dwIdleMaxPerMs = dwIdlePerMs;
+    dwBusy = pLast->dwIdleMaxPerMs ? 100 - (dwIdlePerMs * 100) / pLast->dwIdleMaxPerMs : 0;
+    dwFpx = rxX ? (rxF * 10) / rxX : 0;     // frames per RX transfer, x10
+    dwTpx = txX ? (txF * 10) / txX : 0;     // frames per TX transfer, x10
+
+    if (rxF || txF || dwErr != pLast->dwErr)
+    {
+        // Bytes per ms = kB/s.
+        SMSCINFO((TEXT("SMSC95XX: rx %u kB/s %u frm %u xfer (%u.%u frm/xfer) | tx %u kB/s %u frm %u xfer (%u.%u frm/xfer) | cpu ~%u%% busy\r\n"),
+                  rxB / dt, rxF, rxX, dwFpx / 10, dwFpx % 10, txB / dt, txF, txX,
+                  dwTpx / 10, dwTpx % 10, pAd->hIdleThread ? dwBusy : 0));
+        SMSCINFO((TEXT("SMSC95XX:   totals: rx %u ind %u drop %u nobuf %u err %u badlen %u xfererr %u; tx %u err %u\r\n"),
+                  pAd->dwRxFrames, pAd->dwRxIndicated, pAd->dwRxDropped, pAd->dwRxNoBuffer,
+                  pAd->dwRxErrors, pAd->dwRxBadLen, pAd->dwRxXferErrors,
+                  pAd->dwTxFrames, pAd->dwTxErrors));
+    }
+
+    pLast->dwTick = dwNow;
+    pLast->dwRxBytes = pAd->dwRxBytes;
+    pLast->dwTxBytes = pAd->dwTxBytes;
+    pLast->dwRxFrames = pAd->dwRxFrames;
+    pLast->dwTxFrames = pAd->dwTxFrames;
+    pLast->dwRxXfers = pAd->dwRxXfers;
+    pLast->dwTxXfers = pAd->dwTxXfers;
+    pLast->dwErr = dwErr;
+    pLast->dwIdle = pAd->dwIdleCount;
 }
 
 // Link thread: BMSR poll every SMSC_LINK_POLL_MS, receive filter changes
-// requested by NDIS, and the periodic statistics line (Info zone).
+// requested by NDIS, and the periodic statistics lines (Info zone).
 static DWORD WINAPI SmscLinkThread(LPVOID lpv)
 {
     PSMSC_ADAPTER pAd = (PSMSC_ADAPTER)lpv;
     HANDLE ah[2];
     DWORD dwWait, dwNow, dwNextPoll, dwNextStats, dwTimeout;
-    DWORD dwLastRx = 0, dwLastTx = 0, dwLastErr = 0;
+    SMSC_STATS_SNAP snap;
+
+    memset(&snap, 0, sizeof(snap));
+    snap.dwTick = GetTickCount();
 
     SmscCheckLink(pAd);
 
@@ -377,14 +459,7 @@ static DWORD WINAPI SmscLinkThread(LPVOID lpv)
         if ((LONG)(GetTickCount() - dwNextStats) >= 0)
         {
             dwNextStats = GetTickCount() + SMSC_STATS_INTERVAL;
-            if (pAd->dwRxFrames != dwLastRx || pAd->dwTxFrames != dwLastTx ||
-                pAd->dwRxXferErrors + pAd->dwTxErrors + pAd->dwRxNoBuffer != dwLastErr)
-            {
-                dwLastRx = pAd->dwRxFrames;
-                dwLastTx = pAd->dwTxFrames;
-                dwLastErr = pAd->dwRxXferErrors + pAd->dwTxErrors + pAd->dwRxNoBuffer;
-                SmscLogStats(pAd);
-            }
+            SmscLogStats(pAd, &snap);
         }
     }
     return 0;
@@ -501,6 +576,7 @@ static DWORD WINAPI SmscRxThread(LPVOID lpv)
 
         if (dwUsbErr == USB_NO_ERROR)
         {
+            pAd->dwRxXfers++;
             SmscRxParse(pAd, pRx->pData, dwBytes);
         }
         else if (!pAd->fClosing)
@@ -621,6 +697,7 @@ void SmscStop(PSMSC_ADAPTER pAd)
     SmscCloseThread(&pAd->hRxThread, TEXT("RX"));
     SmscCloseThread(&pAd->hLinkThread, TEXT("link"));
     SmscCloseThread(&pAd->hTxThread, TEXT("TX"));
+    SmscCloseThread(&pAd->hIdleThread, TEXT("CPU probe"));
 
     if (pAd->hPipeIn)
         f->lpClosePipe(pAd->hPipeIn);

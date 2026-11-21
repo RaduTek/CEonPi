@@ -16,8 +16,9 @@
 //   halts the miniport, before the USB side is stopped.
 //
 // Deserialized miniport:
-// - SendPackets only queues the packets; the TX thread copies each one into
-//   a bulk-OUT slot (8-byte SMSC header + frame), completes it to NDIS at
+// - SendPackets only queues the packets; the TX thread copies them into a
+//   bulk-OUT slot (8-byte SMSC header + frame each, up to SMSC_TX_PACK_MAX
+//   frames per slot when several are queued), completes them to NDIS at
 //   once (the data has been copied) and issues the transfer; up to
 //   SMSC_TX_SLOTS transfers are in flight;
 // - received frames are indicated in place with NDIS_STATUS_RESOURCES, so
@@ -294,7 +295,8 @@ static void SmscTxReap(PSMSC_ADAPTER pAd, SMSC_TX_SLOT *pSlot)
 
     if (dwUsbErr == USB_NO_ERROR)
     {
-        pAd->dwTxFrames++;
+        pAd->dwTxFrames += pSlot->dwFrames;
+        pAd->dwTxXfers++;
     }
     else
     {
@@ -314,6 +316,8 @@ DWORD WINAPI SmscTxThread(LPVOID lpv)
     NDIS_HANDLE h;
     HANDLE ah[3];
     DWORD dwHead = 0, dwTail = 0, dwInFlight = 0, n, cb, dwA, dwB, dwWait;
+    DWORD dwOff, cbXfer, cbData;
+    BOOL fEmpty;
 
     for (;;)
     {
@@ -326,43 +330,72 @@ DWORD WINAPI SmscTxThread(LPVOID lpv)
             dwInFlight--;
         }
 
-        // Fill free slots from the queue.
+        // Fill free slots from the queue, packing up to SMSC_TX_PACK_MAX
+        // queued frames into each transfer.
         while (dwInFlight < SMSC_TX_SLOTS && !pAd->fClosing)
         {
-            pPkt = SmscTxDequeue(pAd, &h);
-            if (pPkt == NULL)
-                break;
-
             pSlot = &pAd->aTx[dwTail];
-            cb = SmscTxCopy(pPkt, pSlot->pData + SMSC_TX_HDR_SIZE);
+            pSlot->dwFrames = 0;
+            dwOff = 0;
+            cbXfer = 0;
+            cbData = 0;
+            fEmpty = FALSE;
 
-            // The data is copied: the packet goes back to NDIS now.
-            NdisMSendComplete(h, pPkt, cb ? NDIS_STATUS_SUCCESS : NDIS_STATUS_FAILURE);
-            SmscNdisUnref(pAd);
-
-            if (cb == 0)
+            while (pSlot->dwFrames < SMSC_TX_PACK_MAX)
             {
-                pAd->dwTxErrors++;
-                continue;
+                pPkt = SmscTxDequeue(pAd, &h);
+                if (pPkt == NULL)
+                {
+                    fEmpty = TRUE;
+                    break;
+                }
+
+                cb = SmscTxCopy(pPkt, pSlot->pData + dwOff + SMSC_TX_HDR_SIZE);
+
+                // The data is copied: the packet goes back to NDIS now.
+                NdisMSendComplete(h, pPkt, cb ? NDIS_STATUS_SUCCESS : NDIS_STATUS_FAILURE);
+                SmscNdisUnref(pAd);
+
+                if (cb == 0)
+                {
+                    pAd->dwTxErrors++;
+                    continue;
+                }
+
+                dwA = SMSC_TX_CTRL_0_BUF_SIZE(cb) | SMSC_TX_CTRL_0_FIRST_SEG | SMSC_TX_CTRL_0_LAST_SEG;
+                dwB = SMSC_TX_CTRL_1_PKT_LENGTH(cb);
+                memcpy(pSlot->pData + dwOff, &dwA, 4);
+                memcpy(pSlot->pData + dwOff + 4, &dwB, 4);
+
+                // The transfer ends right after the last frame; the next
+                // header starts on the next 4-byte boundary.
+                cbXfer = dwOff + SMSC_TX_HDR_SIZE + cb;
+                dwOff = (cbXfer + 3) & ~3UL;
+                cbData += cb;
+                pSlot->dwFrames++;
             }
 
-            dwA = SMSC_TX_CTRL_0_BUF_SIZE(cb) | SMSC_TX_CTRL_0_FIRST_SEG | SMSC_TX_CTRL_0_LAST_SEG;
-            dwB = SMSC_TX_CTRL_1_PKT_LENGTH(cb);
-            memcpy(pSlot->pData, &dwA, 4);
-            memcpy(pSlot->pData + 4, &dwB, 4);
+            if (pSlot->dwFrames == 0)
+            {
+                if (fEmpty)
+                    break;
+                continue;       // only bad packets were taken; try again
+            }
 
             ResetEvent(pSlot->hEvent);
             pSlot->hXfer = pAd->pUsbFuncs->lpIssueBulkTransfer(pAd->hPipeOut, SmscXferSignal,
                                                                 pSlot->hEvent, USB_OUT_TRANSFER,
-                                                                SMSC_TX_HDR_SIZE + cb,
-                                                                pSlot->pData, 0);
+                                                                cbXfer, pSlot->pData, 0);
             if (pSlot->hXfer == NULL)
             {
-                pAd->dwTxErrors++;
+                pAd->dwTxErrors += pSlot->dwFrames;
                 continue;
             }
+            pAd->dwTxBytes += cbData;
             dwTail = (dwTail + 1) % SMSC_TX_SLOTS;
             dwInFlight++;
+            if (fEmpty)
+                break;
         }
 
         n = 0;

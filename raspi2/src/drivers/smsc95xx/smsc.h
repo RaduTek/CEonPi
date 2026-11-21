@@ -75,12 +75,20 @@
 #define SMSC_RX_BATCH           32
 
 //
-// TX: up to SMSC_TX_SLOTS bulk-OUT transfers in flight, one frame each,
-// every frame preceded by the 8-byte TX header.
+// TX: up to SMSC_TX_SLOTS bulk-OUT transfers in flight. Every frame is
+// preceded by the 8-byte TX header (TX_CTRL_0/1, FIRST_SEG | LAST_SEG). When
+// several packets are queued, up to SMSC_TX_PACK_MAX frames go into one
+// transfer, back to back: each header starts on a 4-byte boundary, and the
+// pad bytes after a frame are skipped by the chip (TX_CTRL_0 buffer end
+// alignment 0 = 4 bytes). This cuts the transfer (and interrupt, callback
+// and thread wake-up) rate when the Pi sends. Set SMSC_TX_PACK_MAX to 1 for
+// one frame per transfer.
 //
 #define SMSC_TX_SLOTS           8
 #define SMSC_TX_HDR_SIZE        8
-#define SMSC_TX_BUF_SIZE        (SMSC_TX_HDR_SIZE + ETH_MAX_FRAME)
+#define SMSC_TX_PACK_MAX        8
+#define SMSC_TX_FRAME_SPACE     ((SMSC_TX_HDR_SIZE + ETH_MAX_FRAME + 3) & ~3)
+#define SMSC_TX_BUF_SIZE        (SMSC_TX_PACK_MAX * SMSC_TX_FRAME_SPACE)
 
 #define ETH_ALEN                6
 #define ETH_HLEN                14
@@ -121,6 +129,7 @@ typedef struct _SMSC_TX_SLOT
     BYTE           *pData;          // SMSC_TX_BUF_SIZE bytes
     HANDLE          hEvent;         // set by the transfer callback
     USB_TRANSFER    hXfer;          // NULL when free
+    DWORD           dwFrames;       // frames in the transfer
 } SMSC_TX_SLOT;
 
 //
@@ -163,6 +172,7 @@ typedef struct _SMSC_ADAPTER
     HANDLE              hLinkThread;    // link poll, filter, stats
     HANDLE              hTxThread;      // bulk OUT
     HANDLE              hRegThread;     // NdisRegisterAdapter (with retries)
+    HANDLE              hIdleThread;    // CPU-load probe (Info zone only, Debug builds)
     SMSC_RX_BUF         aRx[SMSC_RX_BUFFERS];
     SMSC_TX_SLOT        aTx[SMSC_TX_SLOTS];
 
@@ -199,8 +209,12 @@ typedef struct _SMSC_ADAPTER
     volatile DWORD      dwRxIndicated;  // frames handed to NDIS
     volatile DWORD      dwRxDropped;    // good frames not indicated (no miniport / filter 0)
     volatile DWORD      dwRxNoBuffer;   // no NDIS packet/buffer available
-    volatile DWORD      dwTxFrames;     // bulk-OUT transfers completed OK
+    volatile DWORD      dwTxFrames;     // frames in bulk-OUT transfers completed OK
     volatile DWORD      dwTxErrors;     // bad packets and failed transfers
+    volatile DWORD      dwRxXfers;      // bulk-IN transfers completed OK
+    volatile DWORD      dwTxBytes;      // frame bytes handed to bulk OUT
+    volatile DWORD      dwTxXfers;      // bulk-OUT transfers completed OK
+    volatile DWORD      dwIdleCount;    // incremented by the CPU-load probe thread
 
     volatile BOOL       fClosing;       // USB_CLOSE_DEVICE received / stopping
 } SMSC_ADAPTER, *PSMSC_ADAPTER;
