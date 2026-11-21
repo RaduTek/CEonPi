@@ -22,10 +22,14 @@
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sdhc_standard" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sdbus" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sd_memory" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_aygshell" />
   </FeatureCollection>
   <ConfigurationCollection Name="Configurations" EnforceUniqueItems="False">
     <Configuration Name="Item" TargetBinFilename="nk.bin" BuildType="Debug" FriendlyName="raspi2 ARMV6 Debug">
-      <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True" />
+      <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True">
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:IdleMon:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
+      </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
         <BuildOption Name="Item" OptionId="BuildOption:MS:IMGEBOOT" OptionValue="1" />
@@ -38,7 +42,10 @@
       <Cpu Name="Cpu" CpuName="ARMV6" />
     </Configuration>
     <Configuration Name="Item" TargetBinFilename="nk.bin" BuildType="Retail" FriendlyName="raspi2 ARMV6 Release">
-      <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True" />
+      <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True">
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:IdleMon:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
+      </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
         <BuildOption Name="Item" OptionId="BuildOption:MS:IMGEBOOT" OptionValue="1" />
@@ -53,7 +60,10 @@
       <Cpu Name="Cpu" CpuName="ARMV6" />
     </Configuration>
     <Configuration Name="Item" TargetBinFilename="nk.bin" BuildType="Checked" FriendlyName="raspi2 ARMV6 Checked">
-      <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True" />
+      <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True">
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:IdleMon:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
+      </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
         <BuildOption Name="Item" OptionId="BuildOption:MS:IMGEBOOT" OptionValue="1" />
