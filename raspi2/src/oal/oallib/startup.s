@@ -249,6 +249,21 @@ QuickDebugOut_1
 	mov     pc, lr					; return
 	ENTRY_END
 
+;-----------------------------------------------------------------------
+;    RaspiCpuWaitForInterrupt (called from OEMIdle)
+; Drain the write buffer, then halt the core until an interrupt is
+; pending. ARMv6 CP15 forms (ARM1176 has no WFI/DSB instructions in
+; this assembler): c7,c10,4 = data synchronization barrier,
+; c7,c0,4 = wait for interrupt. Same sequence as Linux cpu_v6_do_idle.
+;-----------------------------------------------------------------------
+
+	LEAF_ENTRY RaspiCpuWaitForInterrupt
+	mov		r0, #0
+	mcr		p15, 0, r0, c7, c10, 4	; drain write buffer
+	mcr		p15, 0, r0, c7, c0, 4	; wait for interrupt
+	mov     pc, lr					; return
+	ENTRY_END
+
 
         END
 

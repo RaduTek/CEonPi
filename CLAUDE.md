@@ -251,6 +251,12 @@ ARM1176.
     `OALIoCtlHalGetCacheInfo` over `g_oalCacheInfo`. It was broken (returned FALSE -> `CeGetCacheInfo`
     failed), which a future DMA path would need; it is harmless to PIO.
 
+## Power: idle (2026-11-21)
+- **Idle:** `OEMIdle` (`src\oal\oallib\power.c`) does drain-write-buffer + CP15 WFI
+  (`RaspiCpuWaitForInterrupt` in `startup.s`). It accumulates `curridlehigh:curridlelow` in 1 us
+  system-timer counts, with `idleconv`=1000, so `GetIdleTime()` is in ms. Verified: builds, boots,
+  and a power meter shows a small drop at idle.
+
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle
 projects all drive the USB controller. For the SD host, FreeBSD `bcm2835_sdhci.c`/`bcm2835_sdhost.c`
