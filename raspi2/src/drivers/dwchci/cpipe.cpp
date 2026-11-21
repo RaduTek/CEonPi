@@ -259,9 +259,6 @@ HCD_REQUEST_STATUS CDwcPipe::IssueTransfer(
     UNREFERENCED_PARAMETER(aLengths);
     UNREFERENCED_PARAMETER(adwIsochErrors);
     UNREFERENCED_PARAMETER(adwIsochLengths);
-    // The client buffer is always copied through DMA memory, so a physical
-    // address supplied by the client is not used.
-    UNREFERENCED_PARAMETER(paBuffer);
 
     if (lpfComplete == NULL || lpdwBytesTransferred == NULL || lpdwError == NULL ||
         (fControl && lpvControlHeader == NULL) ||
@@ -305,7 +302,48 @@ HCD_REQUEST_STATUS CDwcPipe::IssueTransfer(
         }
     }
 
-    if (fOk && dwBufferSize > 0)
+    // Direct DMA: a bulk transfer whose client supplies the physical address
+    // of a physically contiguous buffer is DMAed straight to/from that buffer
+    // instead of being copied through CPhysMem (uncached, so the copy is
+    // slow). The client buffer may be cached: the data cache is written back
+    // before the transfer starts and, for IN, the received bytes are
+    // discarded from it in Complete.
+    // Conditions, otherwise the copy path is used:
+    // - the address and the virtual address are cache-line (32-byte)
+    //   aligned, so cache maintenance cannot touch neighbouring data and the
+    //   core's DMA (word aligned) is satisfied;
+    // - for IN, the size is a whole number of max packets: the channel is
+    //   programmed in whole packets, so the core may write up to that size.
+    if (fOk && dwBufferSize > 0 && paBuffer != 0 && m_bEpType == USB_ENDPOINT_TYPE_BULK &&
+        (paBuffer & (DWC_DIRECT_ALIGN - 1)) == 0 &&
+        ((DWORD)lpvBuffer & (DWC_DIRECT_ALIGN - 1)) == 0 &&
+        (!fIn || (m_wMaxPacket != 0 && (dwBufferSize % m_wMaxPacket) == 0)))
+    {
+        pTransfer->fDirect = TRUE;
+        pTransfer->paData = paBuffer;
+        // Write the buffer's dirty lines back. OUT: the core reads the data
+        // from memory. IN: no dirty line can then be evicted over the DMA
+        // data later; clean lines that hold stale data are discarded after
+        // completion (Complete), over the bytes received only. A discard
+        // here instead would, for a buffer the size of the L1 data cache
+        // (16 KB), invalidate the whole cache on every transfer and evict
+        // everyone else's working set.
+        __try
+        {
+            CacheRangeFlush(lpvBuffer, dwBufferSize, CACHE_SYNC_WRITEBACK);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            fOk = FALSE;
+        }
+        if (!fOk)
+        {
+            FreeTransfer(m_pHcd, pTransfer);
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return requestFailed;
+        }
+    }
+    else if (fOk && dwBufferSize > 0)
     {
         // IN data is received in whole packets, so round the buffer up
         cbAlloc = dwBufferSize;
@@ -338,7 +376,7 @@ HCD_REQUEST_STATUS CDwcPipe::IssueTransfer(
         *lpdwError = USB_NOT_COMPLETE_ERROR;
         if (fControl)
             memcpy(pTransfer->pCtlVa, lpvControlHeader, sizeof(USB_DEVICE_REQUEST));
-        if (dwBufferSize > 0 && !fIn)
+        if (dwBufferSize > 0 && !fIn && !pTransfer->fDirect)
             memcpy(pTransfer->pDataVa, lpvBuffer, dwBufferSize);
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
@@ -1273,6 +1311,13 @@ void CDwcPipe::Complete(CDwcHcd *pHcd, DWC_TRANSFER *pTransfer)
             pTransfer->lpvBuffer != NULL && pTransfer->cbDone > 0)
         {
             memcpy(pTransfer->lpvBuffer, pTransfer->pDataVa, pTransfer->cbDone);
+        }
+        else if ((pTransfer->dwFlags & USB_IN_TRANSFER) && pTransfer->fDirect &&
+                 pTransfer->cbDone > 0)
+        {
+            // Direct DMA: drop any lines fetched into the cache while the
+            // transfer ran, so that the client reads the DMA data.
+            CacheRangeFlush(pTransfer->lpvBuffer, pTransfer->cbDone, CACHE_SYNC_DISCARD);
         }
         if (pTransfer->lpfComplete != NULL)
             *pTransfer->lpfComplete = TRUE;
