@@ -17,6 +17,19 @@
 #include <image_cfg.h>
 
 void ResetSchedulerTimer(UINT32 countsPerMSec);
+
+// rtc.c: SYSINTR_RTC_ALARM once the software RTC alarm is due, else SYSINTR_NOP
+DWORD OALRtcCheckAlarm(void);
+
+// Kernel-defined SYSINTRs below SYSINTR_FIRMWARE have no hardware IRQ on this
+// board (nkintr.h: SYSINTR_PROFILE 9, SYSINTR_TIMING 10, SYSINTR_IST_BGT 11,
+// SYSINTR_RTC_ALARM 13, ...). The kernel enables some of them, e.g.
+// SYSINTR_IST_BGT at boot; SYSINTR_RTC_ALARM is raised by the tick ISR from
+// the software RTC. Accept them as no-ops instead of logging an error.
+static BOOL IsSoftwareSysIntr(DWORD dwSysIntr)
+{
+    return (dwSysIntr != SYSINTR_RESCHED) && (dwSysIntr < SYSINTR_FIRMWARE);
+}
 //------------------------------------------------------------------------------
 // Externs
 //
@@ -136,6 +149,9 @@ BOOL OEMInterruptEnable(DWORD dwSysIntr, LPVOID pvData, DWORD cbData)
     OALMSG(OAL_INTR || OAL_FUNC, (TEXT("OEMInterruptEnable++ dwSysIntr=%d\r\n"),dwSysIntr));
     //NKDbgPrintfW (TEXT("OEMInterruptEnable++ dwSysIntr=%d\r\n"),dwSysIntr);
 
+	if (IsSoftwareSysIntr(dwSysIntr))
+		return TRUE;
+
 	switch (dwSysIntr)
 	{
 	case SYSINTR_UART0:
@@ -182,7 +198,10 @@ BOOL OEMInterruptEnable(DWORD dwSysIntr, LPVOID pvData, DWORD cbData)
 void OEMInterruptDisable(DWORD dwSysIntr)
 {
     OALMSG(OAL_INTR || OAL_FUNC, (TEXT("OEMInterruptDisable++ dwSysIntr=%d\r\n"),dwSysIntr));
-		
+
+	if (IsSoftwareSysIntr(dwSysIntr))
+		return;
+
 	switch (dwSysIntr)
 	{
 	case SYSINTR_UART0:
@@ -226,6 +245,9 @@ void OEMInterruptDone(DWORD dwSysIntr)
 {
     OALMSG(OAL_INTR || OAL_FUNC, (TEXT("OEMInterruptDone++ dwSysIntr=%d\r\n"),dwSysIntr));
     //NKDbgPrintfW (TEXT("OEMInterruptDone++ dwSysIntr=%d\r\n"),dwSysIntr);
+
+	if (IsSoftwareSysIntr(dwSysIntr))
+		return;
 
 	switch (dwSysIntr)
 	{
@@ -426,8 +448,13 @@ VidCON_WriteDebugByteExtern('~');
 			CurMSec = CurMSec + 1;
 
 			// Reschedule?
-			if ((int)(CurMSec - dwReschedTime) >= 0) 
+			if ((int)(CurMSec - dwReschedTime) >= 0)
 				SysIntr = SYSINTR_RESCHED;
+
+			// Software RTC alarm (rtc.c). If a reschedule is due on this
+			// tick the alarm fires on the next one, 1 ms later.
+			if (SysIntr == SYSINTR_NOP)
+				SysIntr = OALRtcCheckAlarm();
 
 			// This should toggle the bit every 512 ticks
 			dwTickCnt++;

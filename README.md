@@ -74,6 +74,7 @@ These are hardware features that are functional
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
 | [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
 | Power | Basic | CPU idles with WFI. Restart through the SoC watchdog; Start > Suspend shuts down (firmware halt, power cycle to restart). Optional apps: CPU idle monitor, Shut Down dialog |
+| Real-Time Clock | Software | The Pi has no battery-backed RTC. The clock runs from the 1 MHz system timer and starts at the image build date on each boot; time set in Date/Time lasts until reboot |
 
 [^1]: Low-speed USB devices won't work when connected to a Full-speed USB hub directly attached to the root port.<br>
 Only applies to full-speed USB 1.1 hubs and the Pi Zero, since Pi 1 has a built-in USB 2.0 hub.<br>
@@ -89,7 +90,6 @@ Things I plan on getting working, in order of priority, after getting Pi 1 board
 |-|-|
 | USB Ethernet | Implement a driver for the SMSC ethernet controller hub of the Pi 1 |
 | Audio | Support the built-in analog audio output of the Pi 1 model B |
-| Real-Time Clock | Most of the needed code seems to be there, but the clock in the taskbar is frozen at 12:00 |
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |
 | Better Display | Support Composite output, no hardcoded resolution in CE image |
 | SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |

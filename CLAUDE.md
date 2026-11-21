@@ -155,8 +155,10 @@ controller so keyboards, mice and USB Ethernet work.
   run outside the controller lock.
 - DMA bus address offset (`DmaBusOffset` = `0x40000000`) is verified by M3.
 - KITL serial output costs about 30 ms per line, so do not log per transfer attempt.
-- The boot log shows `OEMInterruptEnable: ERROR enabling unknown SysIntr=11` around the time
-  GWES loads. It is not caused by the USB driver (M1 enabled no interrupt); source not yet found.
+- The old boot-log line `OEMInterruptEnable: ERROR enabling unknown SysIntr=11` was the kernel
+  enabling `SYSINTR_IST_BGT` (`nkintr.h`: `SYSINTR_DEVICES`+3). `intr.c` now accepts every
+  kernel-defined SYSINTR below `SYSINTR_FIRMWARE` (except `RESCHED`) as a software no-op
+  (`IsSoftwareSysIntr`, same pattern as the VM tree's `platform\ipod6g`).
 
 ## USB driver plan
 1. Root port only. Power on, core reset, host init, port power and reset, detect connect and
@@ -281,6 +283,22 @@ ARM1176.
     `POWER_STATE_RESET`, falling back to `IOCTL_HAL_REBOOT`) / Power off (`POWER_STATE_SUSPEND`) /
     Cancel.
 - CE has no `FrameRect`. Use `Rectangle` with `NULL_BRUSH`.
+
+## RTC (software clock, 2026-11-21)
+- The Pi 1 has no battery-backed RTC. `src\oal\oallib\rtc.c` keeps the time from the 64-bit 1 MHz
+  system timer (`CHI:CLO`, read hi/lo/hi): now = base `FILETIME` + (count - base count) * 10.
+- The base is the image build date (`__DATE__`, 00:00), set lazily on first use (not in `OEMInit`).
+  `OEMSetRealTime` moves the base. Nothing persists across reboots (user decision). It holds local
+  time, as is usual in CE.
+- Alarm: `OEMSetAlarmTime` stores a counter deadline. The Timer 3 tick ISR calls `OALRtcCheckAlarm`
+  when it would otherwise return `SYSINTR_NOP`, and returns `SYSINTR_RTC_ALARM` (= 13,
+  `SYSINTR_DEVICES`+5) once the deadline passes.
+- Pattern from the stock `platform\common\src\common\rtc\timer\rtc.c`: `NKSystemTimeToFileTime` /
+  `NKFileTimeToSystemTime` (declared in `nkexport.h` via `oal.h`) and `INTERRUPTS_ENABLE` around the
+  64-bit state. `IOCTL_HAL_INIT_RTC` stays unregistered, because it would override the build-date
+  base.
+- The CE 7 tree from the VM is visible on the host at `Z:` (`public\`, `platform\`). Check values
+  there instead of guessing.
 
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle
