@@ -256,6 +256,10 @@ ARM1176.
   (`RaspiCpuWaitForInterrupt` in `startup.s`). It accumulates `curridlehigh:curridlelow` in 1 us
   system-timer counts, with `idleconv`=1000, so `GetIdleTime()` is in ms. Verified: builds, boots,
   and a power meter shows a small drop at idle.
+- **Optional apps** (`src\apps`, always built, put in the image by a `BSP_` variable / BSP catalog
+  item, each with a desktop shortcut through `files\*.lnk` + `platform.dat`):
+  - `idlemon.exe` (`BSP_IDLEMON`): CPU load / idle % / `GetIdleTime()`.
+- CE has no `FrameRect`. Use `Rectangle` with `NULL_BRUSH`.
 
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle

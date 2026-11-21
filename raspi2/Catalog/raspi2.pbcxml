@@ -23,6 +23,7 @@
     <BspItemId>Item:Boling Consulting Inc.:TutorialKitlEthernet:BSPTemplate_raspi2</BspItemId>
     <BspItemId>Item:Boling Consulting Inc.:TutorialKitlEthernetPlatformCommon:BSPTemplate_raspi2</BspItemId>
     <BspItemId>Item:Boling Consulting Inc.:TutorialHALFlatDisplayDriver:BSPTemplate_raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:IdleMon:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:Boling Consulting Inc.:BSPTemplateInstructions:BSPTemplate_raspi2">
     <Title>!BSP Template Instructions - Start Here!</Title>
@@ -44,6 +45,17 @@
     <SourceCode>
       <Title>TEMPLATE KITL SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\KITL</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:IdleMon:raspi2">
+    <Title>CPU Idle Monitor (demo)</Title>
+    <Description>Small window showing CPU load, idle percentage and GetIdleTime(), with a desktop shortcut. Sets BSP_IDLEMON=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_IDLEMON</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>CPU IDLE MONITOR SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\IDLEMON</Path>
     </SourceCode>
   </Item>
 </CatalogFile>

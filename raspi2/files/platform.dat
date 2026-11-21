@@ -14,3 +14,7 @@
 ; This file defines custom values for the RAM-based filesystem.  It can be
 ; left blank.  Look at files in public\*\oak\files\*.dat for references on
 ; how to implement custom values.
+; CPU idle monitor demo: desktop shortcut (optional, BSP_IDLEMON=1)
+IF BSP_IDLEMON
+Directory("\Windows\Desktop"):-File("CPU Idle Monitor.lnk","\Windows\idlemon.lnk")
+ENDIF BSP_IDLEMON

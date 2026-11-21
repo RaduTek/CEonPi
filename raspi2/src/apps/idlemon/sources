@@ -1,0 +1,17 @@
+# CPU idle monitor demo app (src\apps\idlemon, idlemon.exe).
+#
+# Shows CPU load, idle percentage and GetIdleTime() in a small window.
+# Included in the image only when BSP_IDLEMON=1 (catalog item
+# "CPU Idle Monitor (demo)", or set it in raspi2.bat). Needs GWES (any OS
+# design with a shell has it).
+
+TARGETNAME=idlemon
+TARGETTYPE=PROGRAM
+EXEENTRY=WinMainCRTStartup
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\corelibc.lib \
+
+SOURCES= \
+    idlemon.cpp

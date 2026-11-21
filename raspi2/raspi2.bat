@@ -36,3 +36,10 @@ rem BSP_NOSD=1 leaves out the SD host controller driver (currently the M0
 rem probe in src\drivers\sdhcbcm). Leave it unset to include the driver.
 rem
 rem set BSP_NOSD=1
+
+rem
+rem BSP_IDLEMON=1 adds the CPU idle monitor demo (src\apps\idlemon) to the
+rem image, with a desktop shortcut. The catalog item "CPU Idle Monitor (demo)"
+rem sets the same variable.
+rem
+rem set BSP_IDLEMON=1

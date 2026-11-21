@@ -15,5 +15,6 @@ DIRS= common \
 	mykitlcore    \
 	kitl    \
 	drivers \
+	apps    \
 
 #	bootloader \
