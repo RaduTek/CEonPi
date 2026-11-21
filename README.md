@@ -55,11 +55,12 @@ needed so the UART works properly at 115200 baud (future investigation into conf
 
 The original project was only tested on the original Raspberry Pi Model B, since that was the only board that existed at the time. Luckily, the Pi Zero uses the same SoC, and the original BSP has booted to a desktop just fine with no modifications.
 
-For the moment, I've only done work on the Pi Zero W, but I intend on getting some OG Pi boards to test on those as well.
+Most of the work was done on the Pi Zero W. The Ethernet driver was developed and tested on a Pi 1 Model B.
 
 | Board | Features |
 |-|-|
 | Pi Zero (W) | HDMI, USB host |
+| Pi 1 Model B | HDMI, USB host, Ethernet |
 
 ## Hardware driver support
 
@@ -73,6 +74,7 @@ These are hardware features that are functional
 | Display | Basic | Fixed resolution, no acceleration whatsoever |
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
 | [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
+| [USB Ethernet](docs/ethernet.md) | Working | SMSC LAN9512 on the Pi 1 Model B: DHCP, IPv4/IPv6, firmware MAC address. ~5.6 MB/s receive, ~3.8 MB/s send (Release build) |
 
 [^1]: Low-speed USB devices won't work when connected to a Full-speed USB hub directly attached to the root port.<br>
 Only applies to full-speed USB 1.1 hubs and the Pi Zero, since Pi 1 has a built-in USB 2.0 hub.<br>
@@ -82,11 +84,10 @@ This is a hardware limitation of the DWC2 controller, see [docs/usb.md](docs/usb
 
 ### Future goals
 
-Things I plan on getting working, in order of priority, after getting Pi 1 boards
+Things I plan on getting working, in order of priority
 
 | Feature | Comments |
 |-|-|
-| USB Ethernet | Implement a driver for the SMSC ethernet controller hub of the Pi 1 |
 | Audio | Support the built-in analog audio output of the Pi 1 model B |
 | Real-Time Clock | Most of the needed code seems to be there, but the clock in the taskbar is frozen at 12:00 |
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |

@@ -4,8 +4,8 @@ A host controller driver for the Synopsys DesignWare USB 2.0 OTG core (DWC2) as 
 BCM2835, letting Windows Embedded Compact 7 use USB keyboards, mice, hubs and mass storage on the
 Raspberry Pi 1 family (notably the Pi Zero, whose single micro-USB OTG port is wired straight to
 the SoC). The driver is `dwchci.dll`; it links the CE USB 2.0 host library `hcd2lib` and plugs
-into the standard CE USB stack, so HID, storage and (in future) class drivers load above it
-unchanged.
+into the standard CE USB stack, so HID, storage and other class drivers (such as the
+[USB Ethernet driver](ethernet.md)) load above it unchanged.
 
 > This file supersedes the old `USB_PLAN.md`. It describes the driver as it stands and the work
 > still ahead. Build/boot mechanics for the whole BSP live in `CLAUDE.md`.
@@ -31,7 +31,8 @@ to mount FAT/exFAT), multi-level hub topologies and device hot-plug all work.
 | Hot-plug teardown, disconnect/wedge recovery, nested hubs | Done |
 | Isochronous pipes | **Not implemented** (pipe creation refused) |
 | Power management (suspend/resume, `IClass`) | **Not implemented** |
-| USB Ethernet class driver | **Not started** (separate driver, not part of the HCD) |
+| Direct (zero-copy) DMA for bulk transfers with a client physical address | Done |
+| USB Ethernet driver (SMSC LAN9512, Pi 1 Model B) | Done - separate driver, see [ethernet.md](ethernet.md) |
 
 ### Resolved problems worth remembering
 
@@ -104,10 +105,22 @@ Source in `raspi2\src\drivers\dwchci`:
   which runs **without** the lock.
 - One transfer per pipe is active at a time, on one channel, one attempt at a time; the channel is
   released after every attempt.
-- Buffer DMA mode. All client data is copied through `CPhysMem` (uncached, contiguous, 32-byte
-  aligned), so there are no cache or alignment issues; a client-supplied physical address is
-  ignored and IN buffers are rounded up to a whole packet. Bus address = physical address +
-  `DmaBusOffset` (registry, default `0x40000000`, verified).
+- Buffer DMA mode. By default client data is copied through `CPhysMem` (uncached, contiguous,
+  32-byte aligned), so there are no cache or alignment issues; IN buffers are rounded up to a whole
+  packet. Bus address = physical address + `DmaBusOffset` (registry, default `0x40000000`,
+  verified).
+- **Direct DMA.** A **bulk** transfer whose client passes the physical address of a physically
+  contiguous buffer is DMAed straight to/from that buffer - no `CPhysMem` allocation and no copy -
+  when the address and the virtual address are 32-byte (cache line) aligned and, for IN, the size
+  is a whole number of max packets (the channel is programmed in whole packets). The buffer may be
+  cached: `IssueTransfer` writes its dirty lines back (`CACHE_SYNC_WRITEBACK`), and `Complete`
+  discards the received bytes (`CACHE_SYNC_DISCARD`) before the callback. Only a *write back* is
+  done before an IN, never a discard: for a 16 KB buffer (the size of the L1 data cache) the OAL
+  turns a range discard into a whole-cache invalidate, which evicted everyone's working set on
+  every transfer. The Ethernet driver uses this path (cached `AllocPhysMem` buffers); CE's USB
+  mass storage driver also passes physical addresses (uncached buffers) and takes it when the size
+  fits - verified with checksummed copies both ways. The uncached copy was the main per-byte cost of
+  network receive.
 - `HCINTMSK` = channel-halted + AHB error; the reason for a halt is decoded from the other `HCINT`
   bits (transfer complete, stall, babble, NAK, then errors with three retries).
 - For split transactions the HCCHAR `MULTICNT` field is the error/retry count: 3 for
@@ -183,9 +196,7 @@ transfer attempt. In a retail build `DEBUGMSG` compiles out entirely.
 
 In rough priority order:
 
-1. **USB Ethernet class driver** - the project's headline goal. This is a separate driver, not more
-   HCD work: the controller already provides the bulk IN/OUT, interrupt-status and control transfers
-   an SMSC LAN95xx needs (`platform.reg` already stubs the VID/PID). This is the main next milestone.
+1. ~~USB Ethernet class driver~~ - done, see [ethernet.md](ethernet.md).
 2. **Driver clean-up (remainder of M5).** Logging is now zoned; still open: drop the unused
    `src\INC\dwcRegs.h` (the original author's unverified bitfield header), and decide whether to
    register the power-management `IClass`.
