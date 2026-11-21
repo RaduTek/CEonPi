@@ -60,8 +60,12 @@
 // BURST_CAP * 512 bytes. Each frame is preceded by a 4-byte status word and
 // SMSC_RX_DATA_OFFSET pad bytes (HW_CFG.RXDOFF), includes the 4-byte FCS and
 // is padded to a 4-byte boundary. Four buffers keep a transfer queued at the
-// HCD while the RX thread parses and indicates the previous ones (dwchci DMA
-// pool: 4 x 16 KB of its 320 KB).
+// HCD while the RX thread parses and indicates the previous ones.
+//
+// RX and TX buffers are physically contiguous cached memory (AllocPhysMem,
+// page aligned) and their physical addresses go with each bulk transfer, so
+// dwchci DMAs straight into/out of them (with cache maintenance) instead of
+// copying through its uncached DMA pool.
 //
 #define SMSC_RX_BUFFERS         4
 #define SMSC_HS_BURST_CAP       32                          // 512-byte packets
@@ -118,7 +122,8 @@
 // One queued bulk-IN transfer
 typedef struct _SMSC_RX_BUF
 {
-    BYTE           *pData;          // SMSC_RX_BUF_SIZE bytes
+    BYTE           *pData;          // SMSC_RX_BUF_SIZE bytes (AllocPhysMem, cached)
+    ULONG           paData;         // its physical address, for direct DMA
     HANDLE          hEvent;         // set by the transfer callback
     USB_TRANSFER    hXfer;          // NULL when not queued
 } SMSC_RX_BUF;
@@ -126,7 +131,8 @@ typedef struct _SMSC_RX_BUF
 // One bulk-OUT transfer slot
 typedef struct _SMSC_TX_SLOT
 {
-    BYTE           *pData;          // SMSC_TX_BUF_SIZE bytes
+    BYTE           *pData;          // SMSC_TX_BUF_SIZE bytes (AllocPhysMem, cached)
+    ULONG           paData;         // its physical address, for direct DMA
     HANDLE          hEvent;         // set by the transfer callback
     USB_TRANSFER    hXfer;          // NULL when free
     DWORD           dwFrames;       // frames in the transfer

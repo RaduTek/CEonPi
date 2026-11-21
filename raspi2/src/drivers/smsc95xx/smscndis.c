@@ -385,7 +385,7 @@ DWORD WINAPI SmscTxThread(LPVOID lpv)
             ResetEvent(pSlot->hEvent);
             pSlot->hXfer = pAd->pUsbFuncs->lpIssueBulkTransfer(pAd->hPipeOut, SmscXferSignal,
                                                                 pSlot->hEvent, USB_OUT_TRANSFER,
-                                                                cbXfer, pSlot->pData, 0);
+                                                                cbXfer, pSlot->pData, pSlot->paData);
             if (pSlot->hXfer == NULL)
             {
                 pAd->dwTxErrors += pSlot->dwFrames;

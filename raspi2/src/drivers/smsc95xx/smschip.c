@@ -526,7 +526,7 @@ static BOOL SmscRxQueue(PSMSC_ADAPTER pAd, DWORD i)
     ResetEvent(pRx->hEvent);
     pRx->hXfer = pAd->pUsbFuncs->lpIssueBulkTransfer(pAd->hPipeIn, SmscXferSignal, pRx->hEvent,
                                                       USB_IN_TRANSFER | USB_SHORT_TRANSFER_OK,
-                                                      SMSC_RX_BUF_SIZE, pRx->pData, 0);
+                                                      SMSC_RX_BUF_SIZE, pRx->pData, pRx->paData);
     return pRx->hXfer != NULL;
 }
 
@@ -628,14 +628,16 @@ BOOL SmscStart(PSMSC_ADAPTER pAd)
     for (i = 0; i < SMSC_RX_BUFFERS; i++)
     {
         pAd->aRx[i].hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-        pAd->aRx[i].pData = (BYTE *)LocalAlloc(LMEM_FIXED, SMSC_RX_BUF_SIZE);
+        pAd->aRx[i].pData = (BYTE *)AllocPhysMem(SMSC_RX_BUF_SIZE, PAGE_READWRITE, 0, 0,
+                                                 &pAd->aRx[i].paData);
         if (!pAd->aRx[i].hEvent || !pAd->aRx[i].pData)
             return FALSE;
     }
     for (i = 0; i < SMSC_TX_SLOTS; i++)
     {
         pAd->aTx[i].hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-        pAd->aTx[i].pData = (BYTE *)LocalAlloc(LMEM_FIXED, SMSC_TX_BUF_SIZE);
+        pAd->aTx[i].pData = (BYTE *)AllocPhysMem(SMSC_TX_BUF_SIZE, PAGE_READWRITE, 0, 0,
+                                                 &pAd->aTx[i].paData);
         if (!pAd->aTx[i].hEvent || !pAd->aTx[i].pData)
             return FALSE;
     }
@@ -710,7 +712,7 @@ void SmscStop(PSMSC_ADAPTER pAd)
         if (pAd->aRx[i].hEvent)
             CloseHandle(pAd->aRx[i].hEvent);
         if (pAd->aRx[i].pData)
-            LocalFree(pAd->aRx[i].pData);
+            FreePhysMem(pAd->aRx[i].pData);
         pAd->aRx[i].hEvent = NULL;
         pAd->aRx[i].pData = NULL;
     }
@@ -719,7 +721,7 @@ void SmscStop(PSMSC_ADAPTER pAd)
         if (pAd->aTx[i].hEvent)
             CloseHandle(pAd->aTx[i].hEvent);
         if (pAd->aTx[i].pData)
-            LocalFree(pAd->aTx[i].pData);
+            FreePhysMem(pAd->aTx[i].pData);
         pAd->aTx[i].hEvent = NULL;
         pAd->aTx[i].pData = NULL;
     }
