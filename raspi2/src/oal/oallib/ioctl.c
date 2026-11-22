@@ -42,6 +42,10 @@ BOOL OALIoctlHalDdi(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
+// Returns the firmware-assigned board MAC address (for the USB Ethernet driver).
+BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+							  VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
 //------------------------------------------------------------------------------
 //
 //  Global: g_MyoalIoCtlTable[]
@@ -94,6 +98,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 { IOCTL_HAL_SET_KITL_SERIAL_BUFFERS,          0,  OALIoCtlHalSetKitlSerBuffs     },
 { IOCTL_HAL_MY_GET_HARDWARE_POINTERS,         0,  OALIoCtlHalGetHardwarePtrs     },
 { IOCTL_HAL_MY_GET_EMMC_CLOCK,                0,  OALIoCtlHalGetEmmcClock        },
+{ IOCTL_HAL_MY_GET_MAC_ADDRESS,               0,  OALIoCtlHalGetMacAddress       },
 { IOCTL_HAL_DDI,                              0,  OALIoctlHalDdi   },
 
 // Required Termination
@@ -586,4 +591,84 @@ BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 		*pOutSize = sizeof(DWORD);
 
 	return (dwRate != 0);
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  OALIoCtlHalGetMacAddress
+//
+//  Implements IOCTL_HAL_MY_GET_MAC_ADDRESS. Returns the board MAC address the
+//  VideoCore firmware assigns (6 bytes, in transmission order) through the
+//  property mailbox ("get board MAC address" tag). The Pi's LAN951x has no
+//  EEPROM, so the USB Ethernet driver must program this address itself. Same
+//  mailbox buffer and cache handling as OALIoCtlHalGetEmmcClock.
+//
+#define RASPI_PROPTAG_GET_BOARD_MAC    0x00010003
+#define RASPI_MAC_ADDRESS_LEN          6
+
+BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+							  VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	volatile DWORD *pBuff = 0;
+	volatile BYTE *pMac;
+	DWORD dwBuffSize = 0;
+	DWORD dwResp = 0;
+	BYTE *pOut;
+	DWORD dwAll;
+	int rc, i;
+
+	UNREFERENCED_PARAMETER(code);
+	UNREFERENCED_PARAMETER(pInpBuffer);
+	UNREFERENCED_PARAMETER(inpSize);
+
+	if ((pOutBuffer == 0) || (outSize < RASPI_MAC_ADDRESS_LEN))
+		return FALSE;
+
+	if (MailboxGetMailboxBuffer(TRUE, (DWORD *)&pBuff, &dwBuffSize) != 0)
+		return FALSE;
+	if ((pBuff == 0) || (dwBuffSize < 8 * sizeof(DWORD)))
+		return FALSE;
+
+	// Build the property request: get board MAC address.
+	//   [0] total buffer size        [4] tag request/response code (0)
+	//   [1] request code (0)         [5] value bytes 0-3 (MAC bytes 0-3)
+	//   [2] tag id                   [6] value bytes 4-7 (MAC bytes 4-5)
+	//   [3] value buffer size (8)    [7] end tag (0)
+	// The response is 6 bytes; the value buffer is rounded up to 8.
+	pBuff[0] = 8 * sizeof(DWORD);
+	pBuff[1] = 0x00000000;
+	pBuff[2] = RASPI_PROPTAG_GET_BOARD_MAC;
+	pBuff[3] = 2 * sizeof(DWORD);
+	pBuff[4] = 0x00000000;
+	pBuff[5] = 0x00000000;
+	pBuff[6] = 0x00000000;
+	pBuff[7] = 0x00000000;
+
+	OEMCacheRangeFlush((VOID *)pBuff, 8 * sizeof(DWORD), CACHE_SYNC_WRITEBACK);
+
+	rc = MailboxSendMail(0, MAILBOX_CHAN_PROPARM2VC, ((DWORD)pBuff) >> 4);
+	if (rc == 0)
+		rc = MailboxGetMail(0, MAILBOX_CHAN_PROPARM2VC, &dwResp);
+	if (rc != 0)
+		return FALSE;
+
+	OEMCacheRangeFlush((VOID *)pBuff, 8 * sizeof(DWORD), CACHE_SYNC_DISCARD);
+
+	if ((pBuff[1] != RASPI_PROPERTY_RESPONSE_OK) ||
+		((pBuff[4] & RASPI_PROPERTY_RESPONSE_OK) == 0))
+		return FALSE;
+
+	// The value bytes are the MAC in transmission order.
+	pMac = (volatile BYTE *)&pBuff[5];
+	pOut = (BYTE *)pOutBuffer;
+	dwAll = 0;
+	for (i = 0; i < RASPI_MAC_ADDRESS_LEN; i++)
+	{
+		pOut[i] = pMac[i];
+		dwAll |= pMac[i];
+	}
+	if (pOutSize != 0)
+		*pOutSize = RASPI_MAC_ADDRESS_LEN;
+
+	return (dwAll != 0);
 }

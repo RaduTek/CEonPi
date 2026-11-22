@@ -1,0 +1,10 @@
+;
+; SMSC LAN9512/LAN9514 USB Ethernet driver.
+; USBD client entry points, and DriverEntry for NDIS.
+;
+LIBRARY         SMSC95XX
+
+EXPORTS         USBDeviceAttach
+                USBInstallDriver
+                USBUnInstallDriver
+                DriverEntry

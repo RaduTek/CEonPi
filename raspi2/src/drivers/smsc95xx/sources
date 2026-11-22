@@ -1,0 +1,22 @@
+# SMSC LAN9512/LAN9514 USB Ethernet driver (src\drivers\smsc95xx).
+#
+# USB client driver for the Ethernet function (0424:ec00) of the Pi 1
+# Model B's on-board LAN9512, and an NDIS 5.1 miniport for it. Needs
+# SYSGEN_USB (USBD) and the NDIS/TCP-IP stack in the OS design.
+
+TARGETNAME=smsc95xx
+TARGETTYPE=DYNLINK
+DLLENTRY=_DllEntryCRTStartup
+
+CDEFINES=$(CDEFINES) -DNDIS_MINIPORT_DRIVER -DNDIS51_MINIPORT=1
+
+INCLUDES=$(INCLUDES);$(_PUBLICROOT)\common\ddk\inc
+
+SOURCES= \
+    smscusb.c \
+    smschip.c \
+    smscndis.c
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ndis.lib

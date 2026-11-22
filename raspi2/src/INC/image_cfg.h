@@ -98,6 +98,13 @@ extern "C" {
 // single DWORD (the clock rate). Handler: OALIoCtlHalGetEmmcClock in ioctl.c.
 #define IOCTL_HAL_MY_GET_EMMC_CLOCK          CTL_CODE(FILE_DEVICE_HAL, 2048+12, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
+// The USB Ethernet driver (smsc95xx) uses this to read the board MAC address
+// the VideoCore firmware assigns (B8:27:EB plus the low serial-number bytes on
+// a Pi 1, the same address Linux uses); the LAN951x on the Pi has no EEPROM.
+// Output buffer is 6 bytes, in transmission order. Handler:
+// OALIoCtlHalGetMacAddress in ioctl.c.
+#define IOCTL_HAL_MY_GET_MAC_ADDRESS         CTL_CODE(FILE_DEVICE_HAL, 2048+13, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
 // Structure used by the interrupt code to manage the serial FIFO buffers
 typedef struct {
 	PBYTE pRecvBuff;
