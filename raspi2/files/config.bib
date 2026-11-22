@@ -34,11 +34,16 @@ MEMORY
 ; Use IMGFLASH to set a kernel that will be loaded from the SD card without
 ; a bootloader.  IMGFLASH not defined configures NK to be downloaded via KITL
 ;
+; RAM below ends at 0x88000000 (128 MB). That is only the baseline: OEMInit
+; (init.c GetMainMemoryEnd) sets dwMainMemoryEndAddress to the ARM memory size
+; the firmware reports (256 MB board minus gpu_mem), and the kernel uses that
+; instead. 128 MB is also what OEMInit falls back to if the query fails.
+;
 IF IMGFLASH !
 #define     NKSTART      80040000
 #define     NKLEN        02000000    ; 32MB (Max size. This will be auto-sized)
 #define     RAMSTART     82040000
-#define     RAMLEN       08000000    ; 128 Meg for a 192 Meg split system
+#define     RAMLEN       05FC0000    ; up to 0x88000000, extended by OEMInit
 ELSE
 #define     NKSTART      80008000
 ; Debug builds are larger so we need a bigger binary image
@@ -48,7 +53,7 @@ ELSE
 #define     NKLEN        02000000    ; 32MB (Max size. This will be auto-sized)
 #endif
 #define     RAMSTART     82008000
-#define     RAMLEN       08000000    ; 128 Meg for a 192 Meg split system
+#define     RAMLEN       05FF8000    ; up to 0x88000000, extended by OEMInit
 ENDIF
 
 ;-----------------------------------------------------

@@ -56,8 +56,19 @@ controller so keyboards, mice and USB Ethernet work.
   control in Platform Builder. The README calls it "UART1" but the code uses UART0.
   `UART_readData Error! 500` means a baud-rate mismatch.
 - KITL is on by default (`IMGNOKITL=1` disables it). The boot waits for Platform Builder.
-- The image links at `0x80008000` when `IMGFLASH=1`. `DRAM_SIZE` is 256 MB and `OEMInit` caps
-  main memory at 128 MB, while the Zero has 512 MB.
+- The image links at `0x80008000` when `IMGFLASH=1`. The whole `kernel.img` is resident RAM
+  (about 25 MB for a Checked image). `NKLEN` is only a ceiling (`AUTOSIZE=ON` returns the unused
+  part to RAM).
+- Main memory size (2026-11-22, verified): `OEMInit` (`init.c` `GetMainMemoryEnd`) sets
+  `dwMainMemoryEndAddress` from the firmware "get ARM memory" property tag (`0x00010005`, via
+  `OALMailboxPropertyTag` in `ioctl.c`), falling back to 128 MB if the query fails. The value must be
+  exact: the kernel only shrinks it during its RAM probe, and VideoCore memory is real RAM the probe
+  would accept. `config.bib` `RAM` ends at `0x88000000` as the baseline. Measured: Pi 1 Model B
+  (256 MB) with `gpu_mem=32` -> RAM ends at ~`0x8E000000`, ~199 MB for CE (was ~103 MB); Pi Zero
+  (512 MB) with default GPU memory -> ~422 MB. The `[OAL]` log line from `OEMInit` is not in the KITL
+  log (KITL is not connected yet); confirm from the kernel's `Total Memory Sections` line.
+  `gpu_mem=16` does not boot with only `start.elf`/`fixup.dat` on the card (LED 4 flashes; probably
+  needs the cut-down `start_cd.elf`/`fixup_cd.dat`, untested).
 - Status LED is GPIO16, which is not the Zero's activity LED.
 
 ## USB driver: current state
