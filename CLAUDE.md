@@ -340,6 +340,23 @@ ARM1176.
 - **Do not use the Microchip WinCE LAN95xx driver source or binaries**: its licence makes the
   source confidential and forbids reverse engineering. FreeBSD `if_smsc.c` (BSD) is the reference.
 
+## Analog audio (Pi 1 3.5 mm jack) - working (2026-11-22)
+- **Read `docs/audio.md` first.** Source `src\drivers\pwmaudio` (`pwmaudio.dll`): our PDD
+  (`wavepdd.cpp`) and PWM/DMA engine (`pwmhw.cpp`) under Microsoft's prebuilt wave MDD
+  (`wavemdd.lib`, linked from the public tree, not copied). Catalog items `BSP_AUDIO` (driver) and
+  `BSP_AUDIOTEST` (`src\apps\audiotest`); the OS design needs Waveform Audio (`SYSGEN_AUDIO`).
+- Hardware (verified on a Pi 1 Model B): GPIO40 = PWM0 = **left**, GPIO45 = PWM1 = right (ALT0); PWM
+  clock PLLD/2 = 250 MHz (**PLLD/1 = 500 MHz does not work**: FIFO never drains, jack buzzes); DMA
+  channel 4 (DREQ 5) -> `SYSINTR_AUDIO` = 19 (GPU IRQ 20, OAL `intr.c`).
+- **One FIFO word per PWM period** (channels alternate): `range = clock / (2 * rate)` = 2834 at
+  44.1 kHz. `clock / rate` plays at half speed.
+- CE 7's waveapi **software mixer** sits in front of the driver (every open is 44.1 kHz 16-bit
+  stereo; several apps play at once). Hence a write-cursor ring (16 x 256 frames, finished blocks
+  cleared to silence) and headers completed **on copy**; completing on play and padding blocks with
+  silence made playback choppy.
+- IST priority 110 (`Priority256`); at 251 KITL output during boot starved it. Registry `Dither`
+  (0/1/2, default 2 = TPDF + noise shaping).
+
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle
 projects all drive the USB controller. For the SD host, FreeBSD `bcm2835_sdhci.c`/`bcm2835_sdhost.c`
