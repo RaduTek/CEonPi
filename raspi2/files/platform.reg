@@ -98,7 +98,19 @@ ENDIF BSP_NOUSB !
 
 ; SD host controller driver (src\drivers\sdhcbcm): the BCM2835 PDD over the CE
 ; standard SD host MDD. Set BSP_NOSD=1 to leave it out.
+; With BSP_SDROOT=1 (SD card as root file system, see below) the key goes into
+; the boot hive so the device manager loads it in boot phase 1, together with
+; the SD bus driver. ONLY then: the device manager loads every BuiltIn driver
+; in the boot hive in phase 1 even with BootVars Flags=1, so without
+; BSP_SDROOT (SD bus key not in the boot hive) the host would load before its
+; bus driver and hit DEBUGCHK sdbus.hpp line 200 (g_pSdContainer == NULL).
+; fmerge drops the marker comments inside a false IF.
+; WARNING: never start a comment line with the boot-section marker text; the
+; registry compiler treats such a line as a marker even if more text follows.
 IF BSP_NOSD !
+IF BSP_SDROOT
+; HIVE BOOT SECTION
+ENDIF BSP_SDROOT
 [HKEY_LOCAL_MACHINE\Drivers\BuiltIn\SDHCBcm]
    "Prefix"="SHC"
    "Dll"="sdhcbcm.dll"
@@ -127,7 +139,126 @@ IF BSP_NOSD !
    ; transfer. PIO is the working path. Do not clear this without first adding
    ; external-DMA-engine support. See the SD section of CLAUDE.md.
    "DisableDMA"=dword:1
+   ; 1 = never switch cards to high speed (50 MHz); they stay at 25 MHz.
+   ; The driver never sets the controller's High Speed Enable bit either way.
+   "DisableHighSpeed"=dword:0
+IF BSP_SDROOT
+; END HIVE BOOT SECTION
+ENDIF BSP_SDROOT
 ENDIF BSP_NOSD !
+
+;------------ SD card as root file system (BSP_SDROOT) -----------------------
+; Catalog item "SD card as root file system" sets BSP_SDROOT=1. Needs the SD
+; driver (do not set BSP_NOSD). See docs\sdroot.md.
+;
+; The FAT partition on the SD card (the boot partition: bootcode.bin,
+; kernel.img, ...) is mounted as "\" instead of "\Storage Card". "\Windows" is
+; then the card's Windows folder merged over the ROM image (a file on the card
+; wins), so modules can live on the card. With the RAM file system the RAM
+; object store keeps the registry hives (MountAsBootable stays on it) but is no
+; longer the root; with the ROM-only file system the card is also the bootable
+; volume and holds persistent hives (below).
+;
+; The card must be mounted before the shell starts, so the SD drivers load in
+; boot phase 1: init\BootVars Flags bit 2 starts the device manager in phase 1,
+; and the SD host, SD bus and SD memory keys are copied into the boot hive
+; (the bus/memory values are verbatim from common.reg). "Flags"=1000
+; (DEVFLAGS_BOOTPHASE_1, as ccfgsvc uses) loads the host and bus drivers in
+; phase 1 only; without it the device manager would load a second instance in
+; phase 2, because its duplicate check only compares device names.
+;
+; "Removable"=0 on the SD memory class keys (read by sdmemmain.cpp, default 1)
+; stops the volume from reporting CE_VOLUME_ATTRIBUTE_REMOVABLE. The shell
+; (shcore PathIsRemovableDevice) checks the volume of the first path component,
+; so with a removable root volume every folder in "\" was drawn as a drive.
+;
+; AutoFormat/AutoPart are forced off: this card holds the boot files. The
+; CleanBoot exclusion list protects the boot files and \Windows in case the
+; file system ever performs a clean boot of the root volume (that code is in
+; filesys.dll, which has no source here, so this is a precaution).
+IF BSP_SDROOT
+IF BSP_NOSD !
+; HIVE BOOT SECTION
+[HKEY_LOCAL_MACHINE\init\BootVars]
+   ; 1 = storage manager, 2 = device manager in boot phase 1
+   "Flags"=dword:3
+
+; With the RAM file system (fsysram, the default): it stays mounted as
+; \Object Store and keeps the registry hives, but is not the root. The key only
+; exists with fsysram (common.reg), so do not create it otherwise.
+; @CESYSGEN IF FILESYS_FSYSRAM
+[HKEY_LOCAL_MACHINE\System\StorageManager\AutoLoad\ObjectStore]
+   "MountAsRoot"=dword:0
+; @CESYSGEN ENDIF FILESYS_FSYSRAM
+
+[HKEY_LOCAL_MACHINE\System\StorageManager\Profiles\SDMemory]
+   "Name"="SD Memory Card"
+   "MountAsRoot"=dword:1
+   "AutoFormat"=dword:0
+   "AutoPart"=dword:0
+
+[HKEY_LOCAL_MACHINE\System\StorageManager\Profiles\SDHCMemory]
+   "Name"="SD Memory Card"
+   "MountAsRoot"=dword:1
+   "AutoFormat"=dword:0
+   "AutoPart"=dword:0
+
+; ROM-only file system (catalog item "ROM-only File System", no fsysram): no
+; RAM object store, so the card is also the bootable volume. filesys then
+; waits for it in boot phase 1 and keeps the registry hives (and default.vol)
+; in the card's \Windows\Registry, so registry changes persist. The OAL
+; answers IOCTL_HAL_GET_HIVE_CLEAN_FLAG with "keep". With old hives on the
+; card, registry changes in a new kernel.img do not apply: delete
+; \Windows\Registry on the card. See docs\sdroot.md.
+; @CESYSGEN IF !FILESYS_FSYSRAM
+[HKEY_LOCAL_MACHINE\System\StorageManager\Profiles\SDMemory]
+   "MountAsBootable"=dword:1
+
+[HKEY_LOCAL_MACHINE\System\StorageManager\Profiles\SDHCMemory]
+   "MountAsBootable"=dword:1
+; @CESYSGEN ENDIF !FILESYS_FSYSRAM
+
+[HKEY_LOCAL_MACHINE\Drivers\BuiltIn\SDHCBcm]
+   "Flags"=dword:1000
+
+[HKEY_LOCAL_MACHINE\Drivers\Builtin\SDBusDriver]
+   "Order"=dword:15
+   "Dll"="SDBus.dll"
+   "Prefix"="SDC"
+   "ThreadPriority"=dword:64
+   "RequestListDepth"=dword:30
+   "IClass"=multi_sz:"{20FA98A8-B298-4b32-8D72-C716AEE2FA84}=%b","{6F40791D-300E-44E4-BC38-E0E63CA8375C}=%b"
+   "Flags"=dword:1000
+
+[HKEY_LOCAL_MACHINE\Drivers\SDCARD\ClientDrivers\Class\SDMemory_Class]
+   "Dll"="SDMemory.dll"
+   "Prefix"="DSK"
+   "BlockTransferSize"=dword:40
+   "Profile"="SDMemory"
+   "Removable"=dword:0
+   "IClass"=multi_sz:"{A4E7EDDA-E575-4252-9D6B-4195D48BB865}","{8DD679CE-8AB4-43c8-A14A-EA4963FAA715}"
+
+[HKEY_LOCAL_MACHINE\Drivers\SDCARD\ClientDrivers\Class\SDMemory_Class\High_Capacity]
+   "Dll"="SDMemory.dll"
+   "Prefix"="DSK"
+   "BlockTransferSize"=dword:40
+   "Profile"="SDHCMemory"
+   "Removable"=dword:0
+   "IClass"=multi_sz:"{A4E7EDDA-E575-4252-9D6B-4195D48BB865}","{8DD679CE-8AB4-43c8-A14A-EA4963FAA715}"
+
+[HKEY_LOCAL_MACHINE\System\StorageManager\CleanBoot\FileExclusionList]
+   "\\bootcode.bin"=dword:0
+   "\\start.elf"=dword:0
+   "\\fixup.dat"=dword:0
+   "\\start_cd.elf"=dword:0
+   "\\fixup_cd.dat"=dword:0
+   "\\config.txt"=dword:0
+   "\\kernel.img"=dword:0
+   "\\overlays"=dword:0
+   "\\Windows"=dword:0
+; END HIVE BOOT SECTION
+ENDIF BSP_NOSD !
+ENDIF BSP_SDROOT
 
 ; USB Ethernet - SMSC LAN9512/LAN9514 (src\drivers\smsc95xx), the on-board
 ; Ethernet of the Pi 1 Model B/B+. USBD loads it for the Ethernet function,

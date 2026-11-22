@@ -1,0 +1,11 @@
+# Raspberry Pi firmware settings for the CEonPi Windows CE 7 BSP.
+# Copied to the SD card root by mksdcard.js (release dir\sdcard\config.txt).
+
+# Drive HDMI even if no display is detected at power on.
+hdmi_force_hotplug=1
+# Use the whole screen (needed at 1080p).
+disable_overscan=1
+# 3 MHz UART clock: the BSP hard-codes the PL011 divisors (KITL at 115200) for it.
+init_uart_clock=3000000
+# VideoCore memory in MB; the rest is CE RAM. 16 needs start_cd.elf/fixup_cd.dat.
+gpu_mem=32

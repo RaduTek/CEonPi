@@ -26,7 +26,7 @@ controller so keyboards, mice and USB Ethernet work.
   newline: `dirs`, `sources`, `makefile`, `sources.cmn`, `*.c`, `*.cpp`, `*.h`, `*.s`, `*.inc`,
   `*.def`, `*.bib`, `*.reg`, `*.dat`, `*.bat`. `.gitattributes` enforces this on checkout. Do not
   use tools that rewrite line endings, and check diffs for LF-only files.
-- Never touch binary files (`*.bmp`, `*.suo`, `Thumbs.db`).
+- Never touch binary files (`*.bmp`, `*.suo`, `Thumbs.db`, the Pi firmware in `files/sdboot`).
 - `build.exe` is the original 2009 binary and has crashed with heap corruption, so avoid
   exotic `sources` syntax, very long lines or non-ASCII characters.
 - Do not change the memory map (`files/config.bib`, `INC/image_cfg.*`) without asking.
@@ -35,7 +35,19 @@ controller so keyboards, mice and USB Ethernet work.
 - `raspi2.bat`: environment for the BSP. Sets `IMGFLASH=1` (kernel loaded from the SD card
   without a bootloader) and `BSP_NOTOUCH=1`.
 - `files/`: `config.bib` (memory map), `platform.bib`, `platform.reg`, `PostMakeimg.bat`
-  (renames `nk.nb0` to `kernel.img`).
+  (runs `mksdcard.js`: builds `<release dir>\sdcard`, a complete card: everything in
+  `files/sdboot` (Pi firmware, `LICENCE.broadcom`, our `config.txt`), `kernel.img` (a copy of
+  `nk.nb0`) and the `initobj.dat` folders/shortcuts when `BSP_SDROOT=1`; copy its contents to a
+  blank FAT32 card). The firmware must stay in the `sdboot` subfolder: makeimg merges every
+  top-level `*.dat` in the release dir, and `fixup.dat` is binary (`.gitattributes` marks
+  `files/sdboot` firmware as binary; the `*.dat` CRLF rule would corrupt it).
+  `PostFmergeBib.bat` (runs `sdoffload.js`): with `BSP_SDOFFLOAD=1` drops the modules listed as
+  `; SDOFFLOAD` in `platform.bib` from `ce.bib` before romimage; `mksdcard.js` puts them in
+  `sdcard\Windows`. With the Microsoft "ROM-only File System" item (no `fsysram`) and
+  `BSP_SDROOT=1`, the card is also the bootable volume: registry hives persist in the card's
+  `\Windows\Registry` (OAL answers `IOCTL_HAL_GET_HIVE_CLEAN_FLAG` "keep"), and `config.bib`
+  shrinks `FSRAMPERCENT` (both through `@CESYSGEN` conditions on `FILESYS_FSYSRAM`). See
+  `docs/sdroot.md`.
 - `src/INC/`: `BCM2835.h` (peripheral registers), `dwcRegs.h` (DesignWare OTG registers,
   unverified against hardware), `image_cfg.h/.inc`, `bsp_cfg.h`.
 - `src/oal/oallib/`: `startup.s` (GPIO and UART setup), `init.c` (OEMInit, powers USB on through
@@ -46,7 +58,9 @@ controller so keyboards, mice and USB Ethernet work.
 - `src/bootloader/sboot`, `sloader`: bootloaders (not used when `IMGFLASH=1`).
 
 ## Boot and hardware facts learned so far
-- SD card root (FAT32): `bootcode.bin`, `start.elf`, `fixup.dat`, `kernel.img`, `config.txt`.
+- SD card root (FAT32): `bootcode.bin`, `start.elf`, `fixup.dat`, `kernel.img`, `config.txt`
+  (all generated into `<release dir>\sdcard` by the build; `config.txt` source is
+  `files/sdboot/config.txt`).
 - `config.txt` needs:
   - `hdmi_force_hotplug=1` (display).
   - `init_uart_clock=3000000`. The BSP hard-codes the UART divisors (integer 1, fractional 40,

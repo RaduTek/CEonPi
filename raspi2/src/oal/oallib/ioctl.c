@@ -57,6 +57,10 @@ BOOL OALIoCtlHalReboot(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 							  VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
+// Tells filesys never to delete the registry hives at boot (defined below).
+BOOL OALIoCtlHalGetHiveCleanFlag(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+								 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
 //------------------------------------------------------------------------------
 //
 //  Global: g_MyoalIoCtlTable[]
@@ -95,7 +99,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 
 // Platform specific OAL IOCTLs
 //{ IOCTL_HAL_GET_HWENTROPY,                  0,    OALIoCtlHalGetHWEntropy           },
-//{ IOCTL_HAL_GET_HIVE_CLEAN_FLAG,            0,    OALIoCtlHalGetHiveCleanFlag       },
+{ IOCTL_HAL_GET_HIVE_CLEAN_FLAG,              0,  OALIoCtlHalGetHiveCleanFlag    },
 //{ IOCTL_HAL_QUERY_FORMAT_PARTITION,         0,    OALIoCtlHalQueryFormatPartition   },
 //{ IOCTL_HAL_QUERY_DISPLAYSETTINGS,          0,    OALIoCtlHalQueryDisplaySettings   },
 //{ IOCTL_HAL_GET_CPUID,                      0,    OALIoCtlHalGetCPUID               },
@@ -773,4 +777,55 @@ BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 		*pOutSize = RASPI_MAC_ADDRESS_LEN;
 
 	return (dwAll != 0);
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  OALIoCtlHalGetHiveCleanFlag
+//
+//  Implements IOCTL_HAL_GET_HIVE_CLEAN_FLAG. filesys.dll asks this at boot,
+//  with HIVECLEANFLAG_SYSTEM (1) for the system hive and HIVECLEANFLAG_USERS
+//  (2) for the user hives, when the hives live on a persistent volume (ROM-only
+//  file system with the SD card as the bootable volume, docs\sdroot.md). TRUE
+//  would make it delete them and start again from the image defaults.
+//
+//  This board has no "clean registry" switch, so the answer is always "keep":
+//  *pOutBuffer = FALSE and the call returns FALSE (the i.MX31 BSP does the
+//  same). The kernel's "clean memory configuration" at every power-on is
+//  about RAM and must not wipe the card. To reset the registry, delete
+//  \Windows\Registry on the card from a PC.
+//
+#ifndef HIVECLEANFLAG_SYSTEM
+#define HIVECLEANFLAG_SYSTEM  1     // pwinreg.h
+#endif
+#ifndef HIVECLEANFLAG_USERS
+#define HIVECLEANFLAG_USERS   2
+#endif
+
+BOOL OALIoCtlHalGetHiveCleanFlag(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+								 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	DWORD dwFlag = 0;
+
+	UNREFERENCED_PARAMETER(code);
+
+	if ((pInpBuffer != NULL) && (inpSize >= sizeof(DWORD)))
+		dwFlag = *(DWORD *)pInpBuffer;
+
+	if ((pOutBuffer != NULL) && (outSize >= sizeof(BOOL)))
+	{
+		*(BOOL *)pOutBuffer = FALSE;
+		if (pOutSize != NULL)
+			*pOutSize = sizeof(BOOL);
+	}
+	else if (pOutSize != NULL)
+	{
+		*pOutSize = 0;
+	}
+
+	OALMSG(1, (L"[OAL] Hive clean flag %u (%s): keep hives\r\n", dwFlag,
+		(dwFlag == HIVECLEANFLAG_SYSTEM) ? L"system" :
+		(dwFlag == HIVECLEANFLAG_USERS) ? L"users" : L"unknown"));
+
+	return FALSE;
 }

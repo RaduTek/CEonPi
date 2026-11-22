@@ -50,3 +50,22 @@ rem Power off / Cancel) to the image, with a desktop shortcut. The catalog
 rem item "Shut Down dialog (poweroff.exe)" sets the same variable.
 rem
 rem set BSP_POWEROFF=1
+
+rem
+rem BSP_SDROOT=1 mounts the SD card (the FAT boot partition) as the root file
+rem system "\" instead of "\Storage Card", loading the SD drivers in boot
+rem phase 1. The card's Windows folder is merged into \Windows over the ROM
+rem image. Needs the SD driver (BSP_NOSD unset). The catalog item "SD card as
+rem root file system" sets the same variable. See docs\sdroot.md.
+rem
+rem set BSP_SDROOT=1
+
+rem
+rem BSP_SDOFFLOAD=1 leaves the modules listed as "; SDOFFLOAD" in
+rem files\platform.bib out of kernel.img and copies them to sdcard\Windows in
+rem the release dir, so they load from the SD card. Needs BSP_SDROOT=1. The
+rem catalog item "Load optional modules from the SD card" sets the same
+rem variable. After toggling it, makeimg stops with a message if ce.bib was
+rem not rebuilt; delete ce.bib in the release dir and make the image again.
+rem
+rem set BSP_SDOFFLOAD=1

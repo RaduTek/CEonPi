@@ -129,5 +129,14 @@ IF IMGFLASH
     ROMWIDTH = 32
 ENDIF
 
-; Set memory division to ~15% for store and remainder for program RAM
-FSRAMPERCENT=0x25252525     
+; RAM given to the RAM file system (object store). Each byte is the number of
+; 4 KB pages per MB for the 1st, 2nd and 3rd 2 MB and the rest of RAM.
+; With the RAM file system (default): ~15% for the store, remainder for
+; programs. With the ROM-only file system there is no RAM store (the SD card
+; holds files and registry, docs\sdroot.md), so keep only 32 pages, as CEPC
+; does for persistent storage (IMGPERSISTENTSTORAGE).
+; @CESYSGEN IF FILESYS_FSYSRAM
+FSRAMPERCENT=0x25252525
+; @CESYSGEN ELSE
+FSRAMPERCENT=0x00000010
+; @CESYSGEN ENDIF FILESYS_FSYSRAM
