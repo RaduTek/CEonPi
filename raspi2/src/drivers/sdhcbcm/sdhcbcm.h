@@ -18,6 +18,10 @@
 
 #include <SDHC.h>       // CSDHCBase, from the SDIOStdHC\base MDD
 
+// Device registry value (DWORD, default 0): 1 = never use high speed (50 MHz);
+// cards stay at 25 MHz. See GetCapabilities.
+#define SDHCBCM_DISABLE_HIGH_SPEED_KEY  _T("DisableHighSpeed")
+
 // ---------------------------------------------------------------------------
 // Slot subclass. The only override needed for bring-up is GetCapabilities():
 // the Arasan CAPABILITIES register reads 0, so the MDD would otherwise think
@@ -34,6 +38,11 @@ protected:
     // TimeoutClockFrequency); here we only advertise SDMA, high speed, 3.3 V
     // and a 512-byte maximum block length.
     virtual SSDHC_CAPABILITIES GetCapabilities();
+
+    // Never set the Host Control "High Speed Enable" bit: the BCM2835 Arasan
+    // misbehaves with it (FreeBSD bcm2835_sdhci.c SDHCI_QUIRK_DONT_SET_HISPD_BIT).
+    // High speed cards still run at 50 MHz, only the bit stays clear.
+    virtual VOID SetInterface(PSD_CARD_INTERFACE_EX pInterface);
 };
 
 

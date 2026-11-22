@@ -139,6 +139,9 @@ ENDIF BSP_SDROOT
    ; transfer. PIO is the working path. Do not clear this without first adding
    ; external-DMA-engine support. See the SD section of CLAUDE.md.
    "DisableDMA"=dword:1
+   ; 1 = never switch cards to high speed (50 MHz); they stay at 25 MHz.
+   ; The driver never sets the controller's High Speed Enable bit either way.
+   "DisableHighSpeed"=dword:0
 IF BSP_SDROOT
 ; END HIVE BOOT SECTION
 ENDIF BSP_SDROOT
