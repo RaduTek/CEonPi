@@ -129,26 +129,44 @@ IF BSP_NOSD !
    "DisableDMA"=dword:1
 ENDIF BSP_NOSD !
 
-; Placeholder for Network driver
-[HKEY_LOCAL_MACHINE\Drivers\USB\LoadClients\1060_60416\Default\Default\STDMICROETHCTLR]
-   "Prefix"="TST"
-   "Dll"="testdrv.dll"
-[HKEY_LOCAL_MACHINE\Drivers\USB\ClientDrivers\STDMICROETHCTLR]
-   "Prefix"="TST"
-   "Dll"="testdrv.dll"
+; USB Ethernet - SMSC LAN9512/LAN9514 (src\drivers\smsc95xx), the on-board
+; Ethernet of the Pi 1 Model B/B+. USBD loads it for the Ethernet function,
+; VID 0x0424 (1060) / PID 0xEC00 (60416). Part of the USB set: BSP_NOUSB=1
+; leaves it out.
+; @CESYSGEN IF CE_MODULES_USBD
+IF BSP_NOUSB !
+[HKEY_LOCAL_MACHINE\Drivers\USB\LoadClients\1060_60416\Default\Default\SMSC95XX]
+   "DLL"="smsc95xx.dll"
+[HKEY_LOCAL_MACHINE\Drivers\USB\ClientDrivers\SMSC95XX]
+   "DLL"="smsc95xx.dll"
 
+; The same DLL is the NDIS miniport. After USB attach the driver calls
+; NdisRegisterAdapter("SMSC95XX", "SMSC95XX1"); NDIS finds the DLL through
+; Comm\SMSC95XX. Deliberately no Comm\SMSC95XX\Linkage\Route: the adapter must
+; not be brought up at boot before the USB device exists.
+[HKEY_LOCAL_MACHINE\Comm\SMSC95XX]
+   "DisplayName"="SMSC LAN95xx USB Ethernet"
+   "Group"="NDIS"
+   "ImagePath"="smsc95xx.dll"
 
+[HKEY_LOCAL_MACHINE\Comm\SMSC95XX1]
+   "DisplayName"="SMSC LAN95xx USB Ethernet"
+   "Group"="NDIS"
+   "ImagePath"="smsc95xx.dll"
 
+; Optional "NetworkAddress"="0252506900AB" here overrides the firmware MAC.
+[HKEY_LOCAL_MACHINE\Comm\SMSC95XX1\Parms]
+   "BusNumber"=dword:0
+   "BusType"=dword:0
 
-; Test driver
-[HKEY_LOCAL_MACHINE\Drivers\TestDrvr]
-   "Prefix"="TST"
-   "Dll"="testdrv.dll"
-
-; Test driver 1
-[HKEY_LOCAL_MACHINE\Drivers\DrvrTest]
-   "Prefix"="TST"
-   "Dll"="drvrtest.dll"
+[HKEY_LOCAL_MACHINE\Comm\SMSC95XX1\Parms\TcpIp]
+   "EnableDHCP"=dword:1
+   "IpAddress"="0.0.0.0"
+   "Subnetmask"="0.0.0.0"
+   "DefaultGateway"="0.0.0.0"
+   "UseZeroBroadcast"=dword:0
+ENDIF BSP_NOUSB !
+; @CESYSGEN ENDIF CE_MODULES_USBD
 
 ; USB - default class driver for debugging
 [HKEY_LOCAL_MACHINE\Drivers\USB\LoadClients\Default\Default\Default\GenUSB]

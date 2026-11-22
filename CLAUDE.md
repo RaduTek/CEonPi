@@ -310,6 +310,21 @@ ARM1176.
   base.
 - The CE 7 tree from the VM is visible on the host at `Z:` (`public\`, `platform\`). Check values
   there instead of guessing.
+  
+## USB Ethernet driver (SMSC LAN9512, Pi 1 Model B) - working (2026-11-21)
+- **Read `docs/ethernet.md` first.** Source `src\drivers\smsc95xx` (`smsc95xx.dll`): USB client for
+  0424:ec00 and an NDIS 5.1 deserialized miniport in the same DLL. After attach it calls
+  `NdisRegisterAdapter(L"SMSC95XX", L"SMSC95XX1")`; there is deliberately no `Linkage\Route`.
+- MAC from the firmware through the OAL `IOCTL_HAL_MY_GET_MAC_ADDRESS` (property tag 0x00010003).
+  Trap: an OAL change needs `src\oal` rebuilt (check `nk.map` for the new symbol), or the IOCTL is
+  missing and the driver falls back to 02:52:50:69:00:01.
+- Performance is CPU-bound (ARM1176). Release ~5.6 MB/s receive / ~3.8 MB/s send; Checked is about
+  half (hcd2lib `CPhysMem` memsets every block in DEBUG). TX packs up to 8 frames per bulk-OUT
+  transfer (`SMSC_TX_PACK_MAX`); dwchci DMAs bulk transfers directly into client buffers when the
+  client passes a physical address (`fDirect` in `cpipe.cpp`). Never discard (invalidate) a 16 KB
+  range before an IN: the OAL turns it into a whole-L1 invalidate per transfer.
+- **Do not use the Microchip WinCE LAN95xx driver source or binaries**: its licence makes the
+  source confidential and forbids reverse engineering. FreeBSD `if_smsc.c` (BSD) is the reference.
 
 ## Reference code
 CSUD (Chadderz's Simple USB Driver), Linux dwc2, FreeBSD dwc_otg and the USPi and Circle

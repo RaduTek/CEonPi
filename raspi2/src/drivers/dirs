@@ -27,6 +27,7 @@ DIRS= \
     raspibasic_ddi \
     dwchci \
     sdhcbcm \
+    smsc95xx \
 
 
 #    TestDrv \

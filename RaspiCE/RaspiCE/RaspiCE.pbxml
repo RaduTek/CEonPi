@@ -22,7 +22,9 @@
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sdhc_standard" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sdbus" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sd_memory" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_netutils" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_aygshell" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_ethernet" />
   </FeatureCollection>
   <ConfigurationCollection Name="Configurations" EnforceUniqueItems="False">
     <Configuration Name="Item" TargetBinFilename="nk.bin" BuildType="Debug" FriendlyName="raspi2 ARMV6 Debug">

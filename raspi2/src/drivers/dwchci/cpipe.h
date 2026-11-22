@@ -31,6 +31,11 @@ class CDwcTt;
 #define DWC_CTL_BLOCK_SIZE      128
 #define DWC_CTL_STATUS_OFFSET   64
 
+// Alignment (bytes) a client buffer needs, physical and virtual, for a bulk
+// transfer to be DMAed directly instead of copied: the ARM1176 L1 data cache
+// line, so cache maintenance on it stays inside the buffer.
+#define DWC_DIRECT_ALIGN        32
+
 #define DWC_MAX_ERRORS          3       // transaction errors before giving up
 #define DWC_ABORT_WAIT_MS       200     // wait for a channel to halt on abort
 #define DWC_MAX_CSPLIT_NYET     8       // complete-split NYET retries before restart
@@ -54,8 +59,9 @@ typedef struct _DWC_TRANSFER
     // DMA memory from CPhysMem
     PUCHAR  pCtlVa;             // control: SETUP packet + status scratch
     ULONG   paCtl;
-    PUCHAR  pDataVa;            // copy of the client data buffer
-    ULONG   paData;
+    PUCHAR  pDataVa;            // copy of the client data buffer (NULL when direct)
+    ULONG   paData;             // physical address the data stage DMAs to/from
+    BOOL    fDirect;            // DMA straight to the client buffer (paData = client PA)
 
     // Progress
     DWORD   dwStage;

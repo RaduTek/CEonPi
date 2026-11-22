@@ -90,6 +90,7 @@ ENDIF BSP_NODISPLAY !
 ; @CESYSGEN IF CE_MODULES_USBD
 IF BSP_NOUSB !
     dwchci.dll         $(_FLATRELEASEDIR)\dwchci.dll                   NK     SHK
+    smsc95xx.dll       $(_FLATRELEASEDIR)\smsc95xx.dll                 NK     SHK
 IF BSP_USB_UHCI
 ;uhci.dll           $(_FLATRELEASEDIR)\uhci.dll                     NK     SHK
 ENDIF BSP_USB_UHCI
