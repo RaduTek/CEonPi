@@ -98,12 +98,19 @@ ENDIF BSP_NOUSB !
 
 ; SD host controller driver (src\drivers\sdhcbcm): the BCM2835 PDD over the CE
 ; standard SD host MDD. Set BSP_NOSD=1 to leave it out.
-; The key is in the HIVE BOOT SECTION so that with BSP_SDROOT=1 (SD card as
-; root file system, see below) the device manager can load it in boot phase 1.
-; Without BSP_SDROOT the device manager only starts in phase 2 and reads the
-; same key from the full registry, so this changes nothing.
+; With BSP_SDROOT=1 (SD card as root file system, see below) the key goes into
+; the boot hive so the device manager loads it in boot phase 1, together with
+; the SD bus driver. ONLY then: the device manager loads every BuiltIn driver
+; in the boot hive in phase 1 even with BootVars Flags=1, so without
+; BSP_SDROOT (SD bus key not in the boot hive) the host would load before its
+; bus driver and hit DEBUGCHK sdbus.hpp line 200 (g_pSdContainer == NULL).
+; fmerge drops the marker comments inside a false IF.
+; WARNING: never start a comment line with the boot-section marker text; the
+; registry compiler treats such a line as a marker even if more text follows.
 IF BSP_NOSD !
+IF BSP_SDROOT
 ; HIVE BOOT SECTION
+ENDIF BSP_SDROOT
 [HKEY_LOCAL_MACHINE\Drivers\BuiltIn\SDHCBcm]
    "Prefix"="SHC"
    "Dll"="sdhcbcm.dll"
@@ -132,7 +139,9 @@ IF BSP_NOSD !
    ; transfer. PIO is the working path. Do not clear this without first adding
    ; external-DMA-engine support. See the SD section of CLAUDE.md.
    "DisableDMA"=dword:1
+IF BSP_SDROOT
 ; END HIVE BOOT SECTION
+ENDIF BSP_SDROOT
 ENDIF BSP_NOSD !
 
 ;------------ SD card as root file system (BSP_SDROOT) -----------------------
@@ -147,8 +156,8 @@ ENDIF BSP_NOSD !
 ;
 ; The card must be mounted before the shell starts, so the SD drivers load in
 ; boot phase 1: init\BootVars Flags bit 2 starts the device manager in phase 1,
-; and the SD host, SD bus and SD memory keys are copied into the HIVE BOOT
-; SECTION (the bus/memory values are verbatim from common.reg). "Flags"=1000
+; and the SD host, SD bus and SD memory keys are copied into the boot hive
+; (the bus/memory values are verbatim from common.reg). "Flags"=1000
 ; (DEVFLAGS_BOOTPHASE_1, as ccfgsvc uses) loads the host and bus drivers in
 ; phase 1 only; without it the device manager would load a second instance in
 ; phase 2, because its duplicate check only compares device names.

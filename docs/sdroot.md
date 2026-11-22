@@ -28,7 +28,15 @@ The card must be mounted before the shell starts, so the SD drivers load in **bo
   1. The device manager loads drivers from the boot hive, signals `SYSTEM/BootPhase1`, waits for
   phase 2, then loads the rest (`private\winceos\COREOS\device\devcore\devcore.c`).
 - The SD host (`SDHCBcm`), SD bus (`SDBusDriver`) and SD memory class keys are in the HIVE BOOT
-  SECTION. The bus/memory values are copied verbatim from `common.reg`.
+  SECTION, **only when `BSP_SDROOT=1`**. The bus/memory values are copied verbatim from
+  `common.reg`. The device manager loads every `Drivers\BuiltIn` driver in the boot hive in phase 1
+  even with `Flags=1` (it does so for `ccfgsvc` too), so the host key must never be in the boot
+  hive without the bus key: the host then loads before `SDC_Init` and hits `DEBUGCHK` in
+  `sdbus.hpp` line 200 (`g_pSdContainer` NULL). Observed when the item was unticked.
+- Trap: the registry compiler treats **any** comment line that starts with the boot-section marker
+  text (`; HIVE BOOT SECTION ...`) as a marker, even with more text after it. A wrapped comment
+  line like that put `SDHCBcm` back into the boot hive. Check with
+  `grep -a -c SDHCBcm` over `boot.hv` with the NUL bytes removed (the hive stores UTF-16 names).
 - `SDHCBcm` and `SDBusDriver` get `"Flags"=dword:1000` (`DEVFLAGS_BOOTPHASE_1`, the same pattern as
   `ccfgsvc`): loaded in phase 1 only. Without it the device manager loads a second instance in phase
   2, because its duplicate check (`DeviceContent::IsThisDeviceUnique`) only compares device names.
