@@ -14,6 +14,7 @@ makefile     text eol=crlf
 *.reg        text eol=crlf
 *.dat        text eol=crlf
 *.bat        text eol=crlf
+*.js         text eol=crlf
 *.sln        text eol=crlf
 *.pbxml      text eol=crlf
 *.pbcxml     text eol=crlf
@@ -26,3 +27,8 @@ OSDesign.db  text eol=crlf
 *.ico        binary
 *.suo        binary
 Thumbs.db    binary
+# Raspberry Pi firmware (Broadcom, see raspi2/files/sdboot/LICENCE.broadcom).
+# Must come after the *.dat rule above: fixup.dat is binary, not a CE .dat file.
+raspi2/files/sdboot/*.bin  binary
+raspi2/files/sdboot/*.elf  binary
+raspi2/files/sdboot/*.dat  binary

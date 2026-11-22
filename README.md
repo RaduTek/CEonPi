@@ -26,15 +26,18 @@ This README document is mostly handwritten, but architecture docs under `docs/` 
 
 ## Installation
 
-This is very easy. An SD card of any size is needed, formatted to a single FAT partition. Then the following files need to be placed on it's root:
+This is very easy. An SD card of any size is needed, formatted to a single FAT partition (FAT32 for cards over 2 GB). Every image build (Make Run-Time Image) creates an `sdcard` folder in the Platform Builder release directory with everything the card needs; copy the **contents** of that folder to the root of the card:
 
-    bootcode.bin
+    bootcode.bin       Raspberry Pi firmware
+    start.elf          Raspberry Pi firmware
+    fixup.dat          Raspberry Pi firmware
+    start_cd.elf       cut-down firmware, used with gpu_mem=16
+    fixup_cd.dat       cut-down firmware, used with gpu_mem=16
+    LICENCE.broadcom   firmware licence
     config.txt
-    fixup.dat
     kernel.img
-    start.elf
 
-`bootcode.bin`, `fixup.dat` and `start.elf` come from the official Raspberry Pi firmware repository ([raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)). I was a little surprised that the latest work just fine, I expected I'd have to dig up the old boot files from 2013.
+The firmware files and `config.txt` live in [raspi2/files/sdboot](raspi2/files/sdboot); the firmware comes from the official Raspberry Pi firmware repository ([raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)) and is redistributed under its licence (`LICENCE.broadcom`). I was a little surprised that the latest work just fine, I expected I'd have to dig up the old boot files from 2013.
 
 The `config.txt` file is quite short:
 
@@ -51,7 +54,7 @@ None of these config lines are needed to boot the kernel, but do come in handy:
 needed so the UART works properly at 115200 baud (future investigation into configuring UART clock dividers for 115200 @ 48 MHz needed)
 - `gpu_mem=32` reduce amount of memory allocated to the GPU to free up more memory for general use - may be removed or changed later depending on how the Video driver evolves
 
-`kernel.img` is the built CE kernel together with it's ROM file system. This file is the `NK.nb0` renamed by the `PostMakeimg.bat` script, and can be found in the Platform Builder project output folder. The image is linked at offset `0x80008000` and is loaded in the same way as the Linux kernel.
+`kernel.img` is the built CE kernel together with it's ROM file system. It is a copy of `NK.nb0` made by `PostMakeimg.bat` (through `mksdcard.js`); `NK.nb0` itself stays in the release directory. With the "SD card as root file system" catalog item, the `sdcard` folder also holds the desktop shortcuts and startup folders (see [docs/sdroot.md](docs/sdroot.md)). The image is linked at offset `0x80008000` and is loaded in the same way as the Linux kernel.
 
 ## Board support
 
