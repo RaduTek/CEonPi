@@ -1,0 +1,26 @@
+# PWM audio driver for the Pi 1 analog jack (src\drivers\pwmaudio).
+#
+# Our PDD (wavepdd.cpp) and PWM/DMA render engine (pwmhw.cpp) over the
+# Microsoft wave MDD. Opt-in: the image only gets it with BSP_AUDIO=1, and
+# the OS design needs the Waveform Audio catalog item (SYSGEN_AUDIO).
+
+TARGETNAME=pwmaudio
+TARGETTYPE=DYNLINK
+
+# wavemdd.lib defines DllEntry; _DllEntryCRTStartup calls it.
+DLLENTRY=_DllEntryCRTStartup
+
+# pwmaudio.def is used as is (no PREPROCESSDEFFILE, see ..\sdhcbcm\sources).
+
+# wavemdd.lib must be whole-archive linked (SOURCELIBS) so the WAV_* stream
+# entry points it defines are pulled in for the .def to export. Prebuilt
+# public lib: use the public path, not $(_COMMONOAKROOT) (see ..\sdhcbcm).
+SOURCELIBS=$(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\wavemdd.lib
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \
+
+SOURCES= \
+    pwmhw.cpp \
+    wavepdd.cpp

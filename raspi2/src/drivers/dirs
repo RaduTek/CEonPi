@@ -28,6 +28,7 @@ DIRS= \
     dwchci \
     sdhcbcm \
     smsc95xx \
+    pwmaudio \
 
 
 #    TestDrv \

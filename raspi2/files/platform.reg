@@ -260,6 +260,41 @@ IF BSP_NOSD !
 ENDIF BSP_NOSD !
 ENDIF BSP_SDROOT
 
+; Analog audio - Pi 1 3.5 mm jack (src\drivers\pwmaudio). PWM on GPIO40/45
+; fed by DMA channel 4. Optional: catalog item "Analog audio (Pi 1 3.5 mm
+; jack)" sets BSP_AUDIO=1; needs the Waveform Audio catalog item. See
+; docs\audio.md.
+; @CESYSGEN IF CE_MODULES_WAVEAPI
+IF BSP_NOAUDIO !
+IF BSP_AUDIO
+[HKEY_LOCAL_MACHINE\Drivers\BuiltIn\PwmAudio]
+   "Prefix"="WAV"
+   "Dll"="pwmaudio.dll"
+   "Index"=dword:1
+   "Order"=dword:30
+   ; Static SysIntr for DMA channel 4 (GPU IRQ 20), wired in the OAL as
+   ; SYSINTR_AUDIO (= 19).
+   "SysIntr"=dword:13
+   ; Physical to VideoCore bus address offset for the DMA buffer (as dwchci).
+   "DmaBusOffset"=dword:40000000
+   ; 1 = at load, play 0.5 s 440 Hz on the left, then 0.5 s 880 Hz on the
+   ; right (hardware bring-up test; verified on a Pi 1 Model B).
+   "TestTone"=dword:0
+   ; Audio IST priority (110), read by the MDD and the test tone. Must be
+   ; above the boot/NDIS threads (251) and SMSC95XX data threads (130):
+   ; at 251 heavy KITL output during boot made the refill miss deadlines
+   ; (crackle). USB's IST stays above it at 101.
+   "Priority256"=dword:6E
+   ; Requantisation of 16-bit samples to the PWM range (~11.5 bits at
+   ; 44.1 kHz): 0 = truncate, 1 = TPDF dither, 2 = TPDF dither + 1st-order
+   ; noise shaping (driver default). Read when the driver loads.
+   "Dither"=dword:2
+   ; Publish the audio device interface for waveapi.
+   "IClass"=multi_sz:"{37168569-61C4-45fd-BD54-9442C7DBA46F}"
+ENDIF BSP_AUDIO
+ENDIF BSP_NOAUDIO !
+; @CESYSGEN ENDIF CE_MODULES_WAVEAPI
+
 ; USB Ethernet - SMSC LAN9512/LAN9514 (src\drivers\smsc95xx), the on-board
 ; Ethernet of the Pi 1 Model B/B+. USBD loads it for the Ethernet function,
 ; VID 0x0424 (1060) / PID 0xEC00 (60416). Part of the USB set: BSP_NOUSB=1

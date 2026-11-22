@@ -1,0 +1,14 @@
+;
+; PWM audio driver (Pi 1 analog jack). The WAV_* stream entry points come
+; from the Microsoft wave MDD (wavemdd.lib); the PDD is wavepdd.cpp.
+;
+LIBRARY         PWMAUDIO
+
+EXPORTS
+                WAV_Init
+                WAV_Deinit
+                WAV_Open
+                WAV_Close
+                WAV_IOControl
+                WAV_PowerUp
+                WAV_PowerDown

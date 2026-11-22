@@ -106,6 +106,18 @@ ENDIF BSP_NOUSB !
 IF BSP_NOSD !
     sdhcbcm.dll        $(_FLATRELEASEDIR)\sdhcbcm.dll                  NK     SHK
 ENDIF BSP_NOSD !
+
+; Analog audio driver (src\drivers\pwmaudio) for the Pi 1 3.5 mm jack.
+; Optional: set BSP_AUDIO=1 (catalog item "Analog audio (Pi 1 3.5 mm jack)").
+; Needs the Waveform Audio catalog item (waveapi.dll).
+; @CESYSGEN IF CE_MODULES_WAVEAPI
+IF BSP_NOAUDIO !
+IF BSP_AUDIO
+    pwmaudio.dll       $(_FLATRELEASEDIR)\pwmaudio.dll                 NK     SHK
+ENDIF BSP_AUDIO
+ENDIF BSP_NOAUDIO !
+; @CESYSGEN ENDIF CE_MODULES_WAVEAPI
+
 ; @CESYSGEN ENDIF CE_MODULES_DEVICE
 
 ; CPU idle monitor demo (src\apps\idlemon): shows CPU load, idle % and
