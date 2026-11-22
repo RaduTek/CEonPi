@@ -134,6 +134,17 @@ IF BSP_POWEROFF
     poweroff.exe       $(_FLATRELEASEDIR)\poweroff.exe                 NK
 ENDIF BSP_POWEROFF
 
+; Audio test (src\apps\audiotest): waveOut tones and PlaySound. Optional:
+; set BSP_AUDIOTEST=1 (catalog item "Audio test (audiotest.exe)").
+; platform.dat puts a shortcut on the desktop.
+; @CESYSGEN IF CE_MODULES_WAVEAPI
+IF BSP_NOAUDIO !
+IF BSP_AUDIOTEST
+    audiotest.exe      $(_FLATRELEASEDIR)\audiotest.exe                NK
+ENDIF BSP_AUDIOTEST
+ENDIF BSP_NOAUDIO !
+; @CESYSGEN ENDIF CE_MODULES_WAVEAPI
+
 ; Modules loaded from the SD card instead of the image (catalog item "Load
 ; optional modules from the SD card", BSP_SDOFFLOAD=1, which needs
 ; BSP_SDROOT=1). With it set, PostFmergeBib.bat (sdoffload.js) removes each
@@ -191,4 +202,11 @@ ENDIF BSP_IDLEMON
 IF BSP_POWEROFF
     poweroff.lnk $(_FLATRELEASEDIR)\poweroff.lnk		  NK	SH
 ENDIF BSP_POWEROFF
+; @CESYSGEN IF CE_MODULES_WAVEAPI
+IF BSP_NOAUDIO !
+IF BSP_AUDIOTEST
+    audiotest.lnk $(_FLATRELEASEDIR)\audiotest.lnk		  NK	SH
+ENDIF BSP_AUDIOTEST
+ENDIF BSP_NOAUDIO !
+; @CESYSGEN ENDIF CE_MODULES_WAVEAPI
 

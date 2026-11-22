@@ -28,6 +28,7 @@
     <BspItemId>Item:CEonPi:SdRoot:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:SdOffload:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:Audio:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:AudioTest:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:Boling Consulting Inc.:BSPTemplateInstructions:BSPTemplate_raspi2">
     <Title>!BSP Template Instructions - Start Here!</Title>
@@ -104,6 +105,17 @@
     <SourceCode>
       <Title>PWM AUDIO DRIVER SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\DRIVERS\PWMAUDIO</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:AudioTest:raspi2">
+    <Title>Audio test (audiotest.exe)</Title>
+    <Description>waveOut test app with a desktop shortcut: plays left/right test tones in several formats and reports timing and position; "audiotest file.wav" plays a file with PlaySound. Needs the Waveform Audio catalog item (SYSGEN_AUDIO) and an audio driver. Sets BSP_AUDIOTEST=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_AUDIOTEST</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>AUDIO TEST SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\AUDIOTEST</Path>
     </SourceCode>
   </Item>
 </CatalogFile>

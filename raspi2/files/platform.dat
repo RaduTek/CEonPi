@@ -23,3 +23,10 @@ ENDIF BSP_IDLEMON
 IF BSP_POWEROFF
 Directory("\Windows\Desktop"):-File("Shut Down.lnk","\Windows\poweroff.lnk")
 ENDIF BSP_POWEROFF
+
+; Audio test: desktop shortcut (optional, BSP_AUDIOTEST=1)
+IF BSP_NOAUDIO !
+IF BSP_AUDIOTEST
+Directory("\Windows\Desktop"):-File("Audio Test.lnk","\Windows\audiotest.lnk")
+ENDIF BSP_AUDIOTEST
+ENDIF BSP_NOAUDIO !
