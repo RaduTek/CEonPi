@@ -43,12 +43,15 @@ extern "C" {
 //------------------------------------------------------------------------------
 //  Define:  IOCTL_PROCESSOR_VENDOR/NAME/CORE
 //
-//  Defines the processor information
+//  Defines the processor information returned by IOCTL_PROCESSOR_INFORMATION
+//  (ioctl.c OALIoCtlProcessorInfo). The System control panel shows it as
+//  "Vendor, Core-Name", e.g. "Broadcom, ARM1176JZF-S-BCM2835". Core and name
+//  must fit in 40 WCHARs (including the terminator), vendor in 100.
 //
 
-#define IOCTL_PROCESSOR_VENDOR              (L"Broadcom, Inc.")
+#define IOCTL_PROCESSOR_VENDOR              (L"Broadcom")
 #define IOCTL_PROCESSOR_NAME                (L"BCM2835")
-#define IOCTL_PROCESSOR_CORE                (L"ARM1176JZ-K")
+#define IOCTL_PROCESSOR_CORE                (L"ARM1176JZF-S")
 #define IOCTL_PROCESSOR_INSTRUCTION_SET     (0)
 
 #define VID_WIDTH                           1920

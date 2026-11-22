@@ -45,6 +45,10 @@ BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords);
 BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
+// Returns the SoC/core/vendor strings (System control panel "Processor").
+BOOL OALIoCtlProcessorInfo(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+						   VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
 // Resets the board through the PM watchdog; never returns (power.c).
 BOOL OALIoCtlHalReboot(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 					   VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
@@ -81,7 +85,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 //{ IOCTL_HAL_GET_DEVICE_INFO,                0,  OALIoCtlHalGetDeviceInfo    },
 //{ IOCTL_HAL_GET_UUID,                       0,  OALIoCtlHalGetUUID          },
 //{ IOCTL_HAL_GET_RANDOM_SEED,                0,  OALIoCtlHalGetRandomSeed    },
-//{ IOCTL_PROCESSOR_INFORMATION,              0,  OALIoCtlProcessorInfo       },
+{ IOCTL_PROCESSOR_INFORMATION,              0,  OALIoCtlProcessorInfo       },
 //{ IOCTL_HAL_UPDATE_MODE,                    0,  OALIoCtlHalUpdateMode       },
 
 
@@ -630,4 +634,64 @@ BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 		*pOutSize = sizeof(DWORD);
 
 	return (dwRate != 0);
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  OALIoCtlProcessorInfo
+//
+//  Implements IOCTL_PROCESSOR_INFORMATION, which the System control panel uses
+//  for its "Processor" line ("Vendor, Core-Name"). Same behaviour as the common
+//  platform\common\src\common\ioctl\procinfo.c, which this OAL does not link
+//  (no oal_ioctl.lib), with the strings from image_cfg.h. The clock speed (MHz)
+//  is the current ARM clock from the VideoCore (700 MHz on a Pi 1, 1000 MHz on
+//  a Zero), or BSP_SPEED_CPUMHZ if the query fails.
+//
+#define RASPI_CLOCK_ID_ARM             0x00000003
+
+BOOL OALIoCtlProcessorInfo(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+						   VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	PROCESSOR_INFO *pInfo = (PROCESSOR_INFO *)pOutBuffer;
+	DWORD adwValues[2];
+	UINT32 cbCore, cbName, cbVendor;
+
+	UNREFERENCED_PARAMETER(code);
+	UNREFERENCED_PARAMETER(pInpBuffer);
+	UNREFERENCED_PARAMETER(inpSize);
+
+	if (pOutSize != 0)
+		*pOutSize = sizeof(PROCESSOR_INFO);
+
+	if ((pOutBuffer == 0) || (outSize < sizeof(PROCESSOR_INFO)))
+	{
+		NKSetLastError(ERROR_INSUFFICIENT_BUFFER);
+		return FALSE;
+	}
+
+	cbCore   = (NKwcslen(IOCTL_PROCESSOR_CORE) + 1) * sizeof(WCHAR);
+	cbName   = (NKwcslen(IOCTL_PROCESSOR_NAME) + 1) * sizeof(WCHAR);
+	cbVendor = (NKwcslen(IOCTL_PROCESSOR_VENDOR) + 1) * sizeof(WCHAR);
+	if ((cbCore > sizeof(pInfo->szProcessCore)) ||
+		(cbName > sizeof(pInfo->szProcessorName)) ||
+		(cbVendor > sizeof(pInfo->szVendor)))
+		return FALSE;
+
+	memset(pInfo, 0, sizeof(PROCESSOR_INFO));
+	pInfo->wVersion = 1;
+	memcpy(pInfo->szProcessCore, IOCTL_PROCESSOR_CORE, cbCore);
+	memcpy(pInfo->szProcessorName, IOCTL_PROCESSOR_NAME, cbName);
+	memcpy(pInfo->szVendor, IOCTL_PROCESSOR_VENDOR, cbVendor);
+	pInfo->dwInstructionSet = IOCTL_PROCESSOR_INSTRUCTION_SET;
+
+	// value[0] = clock id (ARM), value[1] = rate in Hz (filled by VideoCore)
+	adwValues[0] = RASPI_CLOCK_ID_ARM;
+	adwValues[1] = 0;
+	if (OALMailboxPropertyTag(RASPI_PROPTAG_GET_CLOCK_RATE, adwValues, 2) &&
+		(adwValues[1] != 0))
+		pInfo->dwClockSpeed = adwValues[1] / 1000000;
+	else
+		pInfo->dwClockSpeed = BSP_SPEED_CPUMHZ;
+
+	return TRUE;
 }
