@@ -41,6 +41,7 @@ The `config.txt` file is quite short:
     hdmi_force_hotplug=1
     disable_overscan=1
     init_uart_clock=3000000
+    gpu_mem=32
 
 None of these config lines are needed to boot the kernel, but do come in handy:
 
@@ -48,6 +49,7 @@ None of these config lines are needed to boot the kernel, but do come in handy:
 - `disable_overscan=1` makes the image fill the entire screen (needed at 1080p)
 - `init_uart_clock=3000000` sets the UART clock to 3 MHz (the default is 48 MHz)<br>
 needed so the UART works properly at 115200 baud (future investigation into configuring UART clock dividers for 115200 @ 48 MHz needed)
+- `gpu_mem=32` reduce amount of memory allocated to the GPU to free up more memory for general use - may be removed or changed later depending on how the Video driver evolves
 
 `kernel.img` is the built CE kernel together with it's ROM file system. This file is the `NK.nb0` renamed by the `PostMakeimg.bat` script, and can be found in the Platform Builder project output folder. The image is linked at offset `0x80008000` and is loaded in the same way as the Linux kernel.
 
