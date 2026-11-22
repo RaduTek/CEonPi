@@ -43,7 +43,11 @@ controller so keyboards, mice and USB Ethernet work.
   `files/sdboot` firmware as binary; the `*.dat` CRLF rule would corrupt it).
   `PostFmergeBib.bat` (runs `sdoffload.js`): with `BSP_SDOFFLOAD=1` drops the modules listed as
   `; SDOFFLOAD` in `platform.bib` from `ce.bib` before romimage; `mksdcard.js` puts them in
-  `sdcard\Windows`. See `docs/sdroot.md`.
+  `sdcard\Windows`. With the Microsoft "ROM-only File System" item (no `fsysram`) and
+  `BSP_SDROOT=1`, the card is also the bootable volume: registry hives persist in the card's
+  `\Windows\Registry` (OAL answers `IOCTL_HAL_GET_HIVE_CLEAN_FLAG` "keep"), and `config.bib`
+  shrinks `FSRAMPERCENT` (both through `@CESYSGEN` conditions on `FILESYS_FSYSRAM`). See
+  `docs/sdroot.md`.
 - `src/INC/`: `BCM2835.h` (peripheral registers), `dwcRegs.h` (DesignWare OTG registers,
   unverified against hardware), `image_cfg.h/.inc`, `bsp_cfg.h`.
 - `src/oal/oallib/`: `startup.s` (GPIO and UART setup), `init.c` (OEMInit, powers USB on through

@@ -144,5 +144,12 @@ if (offloadOn) {
     log(offloadList.length + " modules moved out of the image copied to Windows");
 }
 
+// ROM-only file system: the registry hives persist on the card and win over
+// the registry in a new kernel.img (docs\sdroot.md).
+if (env("BSP_SDROOT") == "1" && env("SYSGEN_FSROMONLY") == "1") {
+    log("ROM-only file system: the registry is kept in \\Windows\\Registry on the card;");
+    log("delete that folder on the card for registry changes in this image to apply");
+}
+
 log("done: copy the contents of " + sd + " to the root of the SD card");
 WScript.Quit(0);

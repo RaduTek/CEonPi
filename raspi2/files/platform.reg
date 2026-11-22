@@ -151,8 +151,10 @@ ENDIF BSP_NOSD !
 ; The FAT partition on the SD card (the boot partition: bootcode.bin,
 ; kernel.img, ...) is mounted as "\" instead of "\Storage Card". "\Windows" is
 ; then the card's Windows folder merged over the ROM image (a file on the card
-; wins), so modules can live on the card. The RAM object store keeps the
-; registry hives (MountAsBootable stays on it) but is no longer the root.
+; wins), so modules can live on the card. With the RAM file system the RAM
+; object store keeps the registry hives (MountAsBootable stays on it) but is no
+; longer the root; with the ROM-only file system the card is also the bootable
+; volume and holds persistent hives (below).
 ;
 ; The card must be mounted before the shell starts, so the SD drivers load in
 ; boot phase 1: init\BootVars Flags bit 2 starts the device manager in phase 1,
@@ -178,8 +180,13 @@ IF BSP_NOSD !
    ; 1 = storage manager, 2 = device manager in boot phase 1
    "Flags"=dword:3
 
+; With the RAM file system (fsysram, the default): it stays mounted as
+; \Object Store and keeps the registry hives, but is not the root. The key only
+; exists with fsysram (common.reg), so do not create it otherwise.
+; @CESYSGEN IF FILESYS_FSYSRAM
 [HKEY_LOCAL_MACHINE\System\StorageManager\AutoLoad\ObjectStore]
    "MountAsRoot"=dword:0
+; @CESYSGEN ENDIF FILESYS_FSYSRAM
 
 [HKEY_LOCAL_MACHINE\System\StorageManager\Profiles\SDMemory]
    "Name"="SD Memory Card"
@@ -192,6 +199,21 @@ IF BSP_NOSD !
    "MountAsRoot"=dword:1
    "AutoFormat"=dword:0
    "AutoPart"=dword:0
+
+; ROM-only file system (catalog item "ROM-only File System", no fsysram): no
+; RAM object store, so the card is also the bootable volume. filesys then
+; waits for it in boot phase 1 and keeps the registry hives (and default.vol)
+; in the card's \Windows\Registry, so registry changes persist. The OAL
+; answers IOCTL_HAL_GET_HIVE_CLEAN_FLAG with "keep". With old hives on the
+; card, registry changes in a new kernel.img do not apply: delete
+; \Windows\Registry on the card. See docs\sdroot.md.
+; @CESYSGEN IF !FILESYS_FSYSRAM
+[HKEY_LOCAL_MACHINE\System\StorageManager\Profiles\SDMemory]
+   "MountAsBootable"=dword:1
+
+[HKEY_LOCAL_MACHINE\System\StorageManager\Profiles\SDHCMemory]
+   "MountAsBootable"=dword:1
+; @CESYSGEN ENDIF !FILESYS_FSYSRAM
 
 [HKEY_LOCAL_MACHINE\Drivers\BuiltIn\SDHCBcm]
    "Flags"=dword:1000

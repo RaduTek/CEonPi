@@ -17,7 +17,8 @@ of the CE file system (`\`) instead of `\Storage Card`.
 - Everything written under `\` (desktop, `\My Documents`, `\Temp`, ...) lands on the card and
   persists across reboots.
 - The RAM object store stays mounted as `\Object Store` (it keeps the registry hives) but is no
-  longer the root.
+  longer the root. With the ROM-only file system there is no RAM object store and the hives
+  persist on the card (below).
 
 A second catalog item, **Load optional modules from the SD card** (`BSP_SDOFFLOAD`, below), takes
 selected modules out of `kernel.img` and puts them in the card's `Windows` folder.
@@ -61,6 +62,47 @@ nothing finds the files; `sdoffload.js` refuses the combination).
 - **Keep the card in step with the image:** copy the whole `sdcard` folder after every build. A
   module left in the card's `Windows` folder overrides the image's copy, so after removing a
   module from the list (or turning the item off), delete it from the card.
+
+## ROM-only file system: persistent registry on the card (M3)
+Status (2026-11-22): **working on a Pi 1 Model B** (Checked). Verified from the boot log:
+- First boot on a clean card: `FSREG: Mounting clean system hive`, then
+  `FSVOL: Using system database volume "\Windows\Registry\default.vol"`. Second boot:
+  `FSREG: Mounted existing system hive`; settings survived Restart and Suspend
+  (`FSREG: Flushing registry` before each).
+- Boot waits for the card: the card mounts (`Part00`, `CreateCache`) and the system hive loads
+  about 0.1 s later on the waiting filesys thread (before M3 the card mounted ~3 s after it).
+- `Memory Configuring: Total pages: 51478, Filesystem pages = 32` (was 7338 filesystem pages):
+  about 28.5 MB more for programs. Filesystem pages come out of the total, so the total itself only
+  changes with the `kernel.img` size.
+- The hive clean flag is asked three times per boot (system, users, system); every answer is
+  `keep hives`.
+
+Optional, chosen in the OS design: Microsoft catalog item **ROM-only File System**
+(`SYSGEN_FSROMONLY`; keep the default Hive-based Registry), together with `BSP_SDROOT=1`. It
+drops the RAM file system (`fsysram`), which reserves about 15% of RAM (`FSRAMPERCENT`
+`0x25252525`; 7338 "Filesystem pages", about 29 MB, at 224 MB ARM RAM) whether used or not.
+- **`platform.reg`** (inside `IF BSP_SDROOT`): under `; @CESYSGEN IF !FILESYS_FSYSRAM` the SD
+  profiles get `"MountAsBootable"=dword:1`. The card is then the bootable volume: filesys waits for
+  it in boot phase 1 and keeps the hives (`system.hv`, user hives, `default.vol`) in the card's
+  `\Windows\Registry`. The `AutoLoad\ObjectStore` override is now under
+  `; @CESYSGEN IF FILESYS_FSYSRAM` (that key exists only with `fsysram`).
+- **`config.bib`**: `FSRAMPERCENT` is `0x00000010` (32 pages, the CEPC value for persistent
+  storage) without `fsysram`, `0x25252525` with it.
+- **OAL** (`ioctl.c` `OALIoCtlHalGetHiveCleanFlag`): answers `IOCTL_HAL_GET_HIVE_CLEAN_FLAG`
+  with "keep the hives" and logs `[OAL] Hive clean flag 1 (system): keep hives`. The board boots
+  with a "clean memory configuration" every time; that is about RAM and must not wipe the card.
+- **Registry changes in a new image:** existing hives on the card win over the registry in a new
+  `kernel.img`. After a `platform.reg` (or catalog) change, delete `\Windows\Registry` on the card
+  so the new defaults apply; `mksdcard.js` reminds you. Deleting it is also the way to reset the
+  registry.
+- `kernel.img` does not shrink (the RAM FS is not in the image); the gain is RAM and a boot that is
+  guaranteed to wait for the card.
+- Do not select ROM-only without `BSP_SDROOT=1`: there is then no bootable volume for the hives.
+- Build: tick ROM-only File System, **Sysgen** (the `@CESYSGEN` conditions in `platform.reg` and
+  `config.bib` are filtered by the BSP build), then Make Run-Time Image. The OAL changed, so check
+  `nk.map` for `OALIoCtlHalGetHiveCleanFlag`.
+- Still unverified: where `initobj.dat` goes without a RAM FS (`mksdcard.js` already puts its
+  items on the card).
 
 ## How it works (`raspi2\files\platform.reg`, `IF BSP_SDROOT`)
 The card must be mounted before the shell starts, so the SD drivers load in **boot phase 1**:
