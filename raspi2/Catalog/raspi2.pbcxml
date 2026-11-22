@@ -25,6 +25,7 @@
     <BspItemId>Item:Boling Consulting Inc.:TutorialHALFlatDisplayDriver:BSPTemplate_raspi2</BspItemId>
     <BspItemId>Item:CEonPi:IdleMon:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:PowerOff:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:SdRoot:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:Boling Consulting Inc.:BSPTemplateInstructions:BSPTemplate_raspi2">
     <Title>!BSP Template Instructions - Start Here!</Title>
@@ -68,6 +69,17 @@
     <SourceCode>
       <Title>SHUT DOWN DIALOG SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\POWEROFF</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:SdRoot:raspi2">
+    <Title>SD card as root file system</Title>
+    <Description>Mounts the SD card (the FAT boot partition) as the root file system instead of \Storage Card. Its Windows folder is merged into \Windows over the ROM image, and files on the card persist across reboots. The SD drivers load in boot phase 1. Requires the SD host driver. Sets BSP_SDROOT=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_SDROOT</Variable>
+    <Location>Storage</Location>
+    <SourceCode>
+      <Title>SD ROOT REGISTRY SETTINGS</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\FILES</Path>
     </SourceCode>
   </Item>
 </CatalogFile>

@@ -31,6 +31,7 @@
       <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True">
         <Feature Name="Item" CatalogItemId="Item:CEonPi:IdleMon:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:SdRoot:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
@@ -47,6 +48,7 @@
       <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True">
         <Feature Name="Item" CatalogItemId="Item:CEonPi:IdleMon:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:SdRoot:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
@@ -65,6 +67,7 @@
       <FeatureCollection Name="BspFeatures" EnforceUniqueItems="True">
         <Feature Name="Item" CatalogItemId="Item:CEonPi:IdleMon:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:SdRoot:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
