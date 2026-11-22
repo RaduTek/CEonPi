@@ -28,6 +28,8 @@
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_ie7_iesample" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_wceload" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_storemgr_cpl" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_fsromonly" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_fsreghive" />
   </FeatureCollection>
   <ConfigurationCollection Name="Configurations" EnforceUniqueItems="False">
     <Configuration Name="Item" TargetBinFilename="nk.bin" BuildType="Debug" FriendlyName="raspi2 ARMV6 Debug">
