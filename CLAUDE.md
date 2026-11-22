@@ -41,6 +41,9 @@ controller so keyboards, mice and USB Ethernet work.
   blank FAT32 card). The firmware must stay in the `sdboot` subfolder: makeimg merges every
   top-level `*.dat` in the release dir, and `fixup.dat` is binary (`.gitattributes` marks
   `files/sdboot` firmware as binary; the `*.dat` CRLF rule would corrupt it).
+  `PostFmergeBib.bat` (runs `sdoffload.js`): with `BSP_SDOFFLOAD=1` drops the modules listed as
+  `; SDOFFLOAD` in `platform.bib` from `ce.bib` before romimage; `mksdcard.js` puts them in
+  `sdcard\Windows`. See `docs/sdroot.md`.
 - `src/INC/`: `BCM2835.h` (peripheral registers), `dwcRegs.h` (DesignWare OTG registers,
   unverified against hardware), `image_cfg.h/.inc`, `bsp_cfg.h`.
 - `src/oal/oallib/`: `startup.s` (GPIO and UART setup), `init.c` (OEMInit, powers USB on through

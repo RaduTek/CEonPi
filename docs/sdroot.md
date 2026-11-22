@@ -19,8 +19,48 @@ of the CE file system (`\`) instead of `\Storage Card`.
 - The RAM object store stays mounted as `\Object Store` (it keeps the registry hives) but is no
   longer the root.
 
-Planned next (M2): a second catalog item that takes selected modules out of `kernel.img` and stages
-them for the card's `Windows` folder.
+A second catalog item, **Load optional modules from the SD card** (`BSP_SDOFFLOAD`, below), takes
+selected modules out of `kernel.img` and puts them in the card's `Windows` folder.
+
+## Modules loaded from the card (`BSP_SDOFFLOAD`)
+Status (2026-11-22): **working on a Pi 1 Model B** with the IE7 catalog item selected: the
+listed modules are left out of `kernel.img` (no `nk.nb1`), copied to the card's `Windows` folder
+and load from there.
+
+`kernel.img` is resident RAM, so every module in it costs RAM permanently. A module in the card's
+`Windows` folder is demand-paged from the card only when used. Needs `BSP_SDROOT=1` (otherwise
+nothing finds the files; `sdoffload.js` refuses the combination).
+
+- **The list** is the `; SDOFFLOAD <name>` comment lines at the end of the MODULES section in
+  `raspi2\files\platform.bib`. Editing it changes a `.bib` input, so makeimg rebuilds `ce.bib`.
+  First list (about 4.6 MB of the 24.6 MB Checked image): the IE7/internet stack (`ieframe`,
+  `wininet`, `urlmon`, `mlang`, `wininetui`; dependencies of selected catalog items) and the
+  network command-line tools (`connmc`, `rnaapp`, `ping`, `ipconfig`, `route`, `netstat`, `net`,
+  `tracert`, `ndisconfig`, `ipv6`). Then the IE7 browser (`mshtml` 8.6 MB, `mshtmled`, `msls31`,
+  `imgutil`, `pngfilt`, `iesample`, `inetcpl`, about 11 MB): adding the Internet Explorer 7
+  catalog item grew the image contents to 32.3 MB even after the first list, past `NKLEN`
+  (32 MB for Checked/Release), so romimage split it into `nk.nb0` + `nk.nb1` (unbootable). A PE
+  import scan of all 164 remaining image modules found no importer of the browser modules outside
+  the browser group itself. Entries for components not in the image are skipped with a warning.
+- **Stale `nk.nb1`:** `PostMakeimg.bat` reports "too big" when `nk.nb1` exists. `PreRomImage.proj`
+  (makeimg runs it right before romimage) deletes the old `nk.nb0`/`nk.nb1`, so a leftover from an
+  oversized build cannot fail a later build that fits.
+- **Rules for adding a module:** it must not be needed before the card mounts (early in boot phase
+  2) and no boot-phase-1 driver may import it. Check a boot log: if the module loads during boot,
+  keep it in the image. Absolute `\Windows\` references are fine with the card as root.
+- **Build steps:** makeimg runs `PostFmergeBib.bat` -> `sdoffload.js` right after fmerge writes
+  `ce.bib`, before romimage (`makeimg.proj`, `CreateConfigBibFile`). It drops the listed entries
+  from the MODULES section of `ce.bib` and writes `sdoffload.txt` (`ON`/`OFF`, then the removed
+  modules). `PostMakeimg.bat` -> `mksdcard.js` copies those modules into `sdcard\Windows`.
+  `sdoffload.js` is idempotent: if it runs again on an already filtered `ce.bib`, modules from
+  the previous list stay on it.
+- **Toggle trap:** makeimg only rebuilds `ce.bib` when a `.bib` file changes, not when a catalog
+  variable changes. `mksdcard.js` compares `sdoffload.txt` with `BSP_SDOFFLOAD` and stops with
+  "changed since ce.bib was built" on a mismatch: delete `ce.bib` in the release dir and make the
+  image again.
+- **Keep the card in step with the image:** copy the whole `sdcard` folder after every build. A
+  module left in the card's `Windows` folder overrides the image's copy, so after removing a
+  module from the list (or turning the item off), delete it from the card.
 
 ## How it works (`raspi2\files\platform.reg`, `IF BSP_SDROOT`)
 The card must be mounted before the shell starts, so the SD drivers load in **boot phase 1**:

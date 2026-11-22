@@ -26,6 +26,7 @@
     <BspItemId>Item:CEonPi:IdleMon:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:PowerOff:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:SdRoot:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:SdOffload:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:Boling Consulting Inc.:BSPTemplateInstructions:BSPTemplate_raspi2">
     <Title>!BSP Template Instructions - Start Here!</Title>
@@ -79,6 +80,17 @@
     <Location>Storage</Location>
     <SourceCode>
       <Title>SD ROOT REGISTRY SETTINGS</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\FILES</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:SdOffload:raspi2">
+    <Title>Load optional modules from the SD card</Title>
+    <Description>Leaves the modules listed as "; SDOFFLOAD" in platform.bib (IE7 stack, network command-line tools) out of kernel.img and copies them to the Windows folder of the sdcard build folder, so they load from the SD card and take no RAM until used. Requires "SD card as root file system". Sets BSP_SDOFFLOAD=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_SDOFFLOAD</Variable>
+    <Location>Storage</Location>
+    <SourceCode>
+      <Title>SD OFFLOAD LIST AND SCRIPTS</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\FILES</Path>
     </SourceCode>
   </Item>

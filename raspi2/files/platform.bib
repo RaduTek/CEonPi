@@ -122,6 +122,47 @@ IF BSP_POWEROFF
     poweroff.exe       $(_FLATRELEASEDIR)\poweroff.exe                 NK
 ENDIF BSP_POWEROFF
 
+; Modules loaded from the SD card instead of the image (catalog item "Load
+; optional modules from the SD card", BSP_SDOFFLOAD=1, which needs
+; BSP_SDROOT=1). With it set, PostFmergeBib.bat (sdoffload.js) removes each
+; MODULES entry named on a "; SDOFFLOAD <name>" line below from ce.bib before
+; romimage, and mksdcard.js copies the module into the sdcard\Windows build
+; folder; with the card as root it then appears in \Windows. These lines are
+; comments, so without the item they change nothing. Editing them changes
+; this file, so makeimg rebuilds ce.bib and the list takes effect.
+; Rules for a module on this list: nothing may need it before the SD card is
+; mounted (early in boot phase 2), and none of the boot-phase-1 drivers may
+; import it. Measured from a boot log: none of these load during boot.
+; A module not in the image (catalog item not selected) is skipped with a
+; warning, so the list may name optional components.
+; IE7 / internet stack (pulled in as dependencies, about 4.1 MB):
+; SDOFFLOAD ieframe.dll
+; SDOFFLOAD wininet.dll
+; SDOFFLOAD urlmon.dll
+; SDOFFLOAD mlang.dll
+; SDOFFLOAD wininetui.dll
+; IE7 browser (catalog item Internet Explorer 7, about 11 MB; mshtml alone is
+; 8.6 MB). PE import check: only these browser modules import each other and
+; the stack above; nothing else in the image imports them.
+; SDOFFLOAD mshtml.dll
+; SDOFFLOAD mshtmled.dll
+; SDOFFLOAD msls31.dll
+; SDOFFLOAD imgutil.dll
+; SDOFFLOAD pngfilt.dll
+; SDOFFLOAD iesample.exe
+; SDOFFLOAD inetcpl.cpl
+; Network and dial-up tools (about 0.5 MB):
+; SDOFFLOAD connmc.exe
+; SDOFFLOAD rnaapp.exe
+; SDOFFLOAD ping.exe
+; SDOFFLOAD ipconfig.exe
+; SDOFFLOAD route.exe
+; SDOFFLOAD netstat.exe
+; SDOFFLOAD net.exe
+; SDOFFLOAD tracert.exe
+; SDOFFLOAD ndisconfig.exe
+; SDOFFLOAD ipv6.exe
+
 ; The FILES section describes any files that stored in the image but not
 ; fixed-up for execution by romimage.exe.  Applications in the FILES section
 ; will be fixed-up at run-time.

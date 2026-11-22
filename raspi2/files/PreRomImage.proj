@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PreRomImage.proj - makeimg builds this from the flat release directory right
+  before romimage (public\common\oak\misc\makeimg.proj, target PreRomImage,
+  only when romimage is about to run).
+
+  Deletes the previous nk.nb0/nk.nb1. PostMakeimg.bat treats an nk.nb1 as
+  "image too big for NKLEN"; without this, an nk.nb1 left over from an earlier
+  oversized build would fail every later build, even one that fits.
+-->
+<Project DefaultTargets="DeleteOldNbFiles" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="DeleteOldNbFiles">
+    <Message Text="PreRomImage: deleting old nk.nb0/nk.nb1" />
+    <Delete Files="$(_FLATRELEASEDIR)\nk.nb0;$(_FLATRELEASEDIR)\nk.nb1" />
+  </Target>
+</Project>

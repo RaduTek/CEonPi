@@ -15,6 +15,8 @@
 //     store before the card is mounted, so these never reach the card by
 //     themselves. Files named in initobj.dat (File("name","\Windows\src")) are
 //     copied from the release dir by their source file name.
+//   - with BSP_SDOFFLOAD=1 : sdcard\Windows gets the modules that sdoffload.js
+//     removed from the image (listed in sdoffload.txt).
 // Copy the CONTENTS of sdcard to the root of the SD card. See docs\sdroot.md.
 //
 // Exit code 0 = ok, 1 = error (makeimg then reports a failure).
@@ -41,6 +43,29 @@ function sdPath(root, cePath) {
 
 var frd = env("_FLATRELEASEDIR");
 if (!frd || !fso.FolderExists(frd)) fail("_FLATRELEASEDIR is not set or does not exist");
+
+// Modules moved out of the image (BSP_SDOFFLOAD). sdoffload.js wrote
+// sdoffload.txt when ce.bib was last rebuilt: ON/OFF, then the removed
+// modules. makeimg only rebuilds ce.bib when a .bib file changes, not when a
+// catalog item (environment variable) changes, so a mismatch means the image
+// was built with the old setting.
+var offloadOn = (env("BSP_SDOFFLOAD") == "1");
+var offloadList = [];
+var offloadState = "OFF";
+var listFile = fso.BuildPath(frd, "sdoffload.txt");
+if (fso.FileExists(listFile)) {
+    var lts = fso.OpenTextFile(listFile, 1, false, 0);
+    if (!lts.AtEndOfStream) offloadState = lts.ReadLine();
+    while (!lts.AtEndOfStream) {
+        var n = lts.ReadLine();
+        if (n) offloadList.push(n);
+    }
+    lts.Close();
+}
+if (offloadState != (offloadOn ? "ON" : "OFF")) {
+    fail("BSP_SDOFFLOAD (\"Load optional modules from the SD card\") changed since ce.bib was " +
+         "built. Delete ce.bib in " + frd + " and run Make Run-Time Image again.");
+}
 
 var sd = fso.BuildPath(frd, "sdcard");
 if (fso.FolderExists(sd)) {
@@ -104,6 +129,19 @@ if (env("BSP_SDROOT") == "1") {
     }
     ts.Close();
     log("initobj.dat: " + nDirs + " folders, " + nFiles + " files, " + nSkipped + " skipped");
+}
+
+// Modules removed from the image by sdoffload.js go to the card's Windows
+// folder; with the SD card as root they appear in \Windows.
+if (offloadOn) {
+    var winDir = fso.BuildPath(sd, "Windows");
+    ensureFolder(winDir);
+    for (var i = 0; i < offloadList.length; i++) {
+        var msrc = fso.BuildPath(frd, offloadList[i]);
+        if (!fso.FileExists(msrc)) fail(offloadList[i] + " (moved out of the image) not found in " + frd);
+        fso.CopyFile(msrc, fso.BuildPath(winDir, offloadList[i]), true);
+    }
+    log(offloadList.length + " modules moved out of the image copied to Windows");
 }
 
 log("done: copy the contents of " + sd + " to the root of the SD card");
