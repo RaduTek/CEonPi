@@ -80,6 +80,7 @@
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
         <BuildOption Name="Item" OptionId="BuildOption:MS:IMGEBOOT" OptionValue="1" />
+        <BuildOption Name="Item" OptionId="BuildOption:MS:IMGNOKITL" OptionValue="1" />
       </BuildOptionCollection>
       <StringDictionary Name="EnvironmentVariables" />
       <LocaleInfo Name="LocaleInformation" />
