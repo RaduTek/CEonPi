@@ -38,9 +38,20 @@ BOOL OALIoCtlHalGetHardwarePtrs(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 BOOL OALIoctlHalDdi(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 					VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
+// Sends one VideoCore property tag (defined below; also used by init.c).
+BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords);
+
 // Returns the VideoCore EMMC base clock in Hz (for the SD host driver).
 BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
+// Returns the SoC/core/vendor strings (System control panel "Processor").
+BOOL OALIoCtlProcessorInfo(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+						   VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
+// Resets the board through the PM watchdog; never returns (power.c).
+BOOL OALIoCtlHalReboot(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+					   VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
 // Returns the firmware-assigned board MAC address (for the USB Ethernet driver).
 BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
@@ -65,7 +76,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 //
 { IOCTL_HAL_INITREGISTRY,                   0,  OALIoCtlHalInitRegistry     },
 //{ IOCTL_HAL_INIT_RTC,                       0,  OALIoCtlHalInitRTC          },
-//{ IOCTL_HAL_REBOOT,                         0,  OALIoCtlHalReboot           },
+{ IOCTL_HAL_REBOOT,       OAL_IOCTL_FLAG_NOCS,  OALIoCtlHalReboot           },
 //
 //{ IOCTL_HAL_DDK_CALL,                       0,  OALIoCtlHalDdkCall          },
 //
@@ -78,7 +89,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 //{ IOCTL_HAL_GET_DEVICE_INFO,                0,  OALIoCtlHalGetDeviceInfo    },
 //{ IOCTL_HAL_GET_UUID,                       0,  OALIoCtlHalGetUUID          },
 //{ IOCTL_HAL_GET_RANDOM_SEED,                0,  OALIoCtlHalGetRandomSeed    },
-//{ IOCTL_PROCESSOR_INFORMATION,              0,  OALIoCtlProcessorInfo       },
+{ IOCTL_PROCESSOR_INFORMATION,              0,  OALIoCtlProcessorInfo       },
 //{ IOCTL_HAL_UPDATE_MODE,                    0,  OALIoCtlHalUpdateMode       },
 
 
@@ -511,35 +522,35 @@ BOOL OALIoCtlHalGetHardwarePtrs(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 
 //------------------------------------------------------------------------------
 //
-//  Function:  OALIoCtlHalGetEmmcClock
+//  Function:  OALMailboxPropertyTag
 //
-//  Implements IOCTL_HAL_MY_GET_EMMC_CLOCK. Returns the VideoCore EMMC base
-//  clock in Hz (a single DWORD in the output buffer). The SD host driver needs
-//  this because the BCM2835 Arasan capabilities register reads 0, so the base
-//  clock cannot be read from the controller. We ask the VideoCore over the
-//  property mailbox ("get clock rate", clock id = EMMC), reusing the OAL's
-//  mailbox primitives. CACHE_SYNC_* and OEMCacheRangeFlush come from the
-//  already-included nkintr.h / oemglobal.h.
+//  Sends one VideoCore property tag over the property mailbox channel and
+//  waits for the answer. pdwValues holds nWords value words: they are sent as
+//  the request and, on success, overwritten with the response. Returns TRUE
+//  only if the VideoCore answered OK for both the buffer and the tag.
 //
-#define RASPI_PROPTAG_GET_CLOCK_RATE   0x00030002
-#define RASPI_CLOCK_ID_EMMC            0x00000001
+//  Used by OALIoCtlHalGetEmmcClock (below) and by OEMInit (init.c, ARM memory
+//  size). OEMInit calls it before the IOCTL critical section exists, which is
+//  fine: nothing else runs at that point. CACHE_SYNC_* and OEMCacheRangeFlush
+//  come from the already-included nkintr.h / oemglobal.h.
+//
 #define RASPI_PROPERTY_RESPONSE_OK     0x80000000
+#define RASPI_PROPERTY_MAX_WORDS       8
 
-BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
-							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords)
 {
 	volatile DWORD *pBuff = 0;
 	DWORD dwBuffSize = 0;
 	DWORD dwResp = 0;
-	DWORD dwRate = 0;
+	DWORD cbTotal;
+	DWORD i;
 	int rc;
 
-	UNREFERENCED_PARAMETER(code);
-	UNREFERENCED_PARAMETER(pInpBuffer);
-	UNREFERENCED_PARAMETER(inpSize);
-
-	if ((pOutBuffer == 0) || (outSize < sizeof(DWORD)))
+	if ((pdwValues == 0) || (nWords == 0) || (nWords > RASPI_PROPERTY_MAX_WORDS))
 		return FALSE;
+
+	// Buffer header (2 words) + tag header (3 words) + values + end tag.
+	cbTotal = (6 + nWords) * sizeof(DWORD);
 
 	// Shared property-mailbox buffer. TRUE returns its virtual address, which is
 	// numerically the VideoCore L2 bus alias (0x8000xxxx) of the physical page,
@@ -547,27 +558,26 @@ BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 	// GPU (>>4) - the pattern the framebuffer mailbox path already relies on.
 	if (MailboxGetMailboxBuffer(TRUE, (DWORD *)&pBuff, &dwBuffSize) != 0)
 		return FALSE;
-	if ((pBuff == 0) || (dwBuffSize < 8 * sizeof(DWORD)))
+	if ((pBuff == 0) || (dwBuffSize < cbTotal))
 		return FALSE;
 
-	// Build the property request: get clock rate for the EMMC clock.
-	//   [0] total buffer size        [4] tag request/response code (0)
-	//   [1] request code (0)         [5] value[0] = clock id (EMMC)
-	//   [2] tag id                   [6] value[1] = rate (filled by VideoCore)
-	//   [3] value buffer size (8)    [7] end tag (0)
-	pBuff[0] = 8 * sizeof(DWORD);
+	// Build the property request:
+	//   [0] total buffer size        [3] value buffer size (bytes)
+	//   [1] request code (0)         [4] tag request/response code (0)
+	//   [2] tag id                   [5..] values, then the end tag (0)
+	pBuff[0] = cbTotal;
 	pBuff[1] = 0x00000000;
-	pBuff[2] = RASPI_PROPTAG_GET_CLOCK_RATE;
-	pBuff[3] = 2 * sizeof(DWORD);
+	pBuff[2] = dwTag;
+	pBuff[3] = nWords * sizeof(DWORD);
 	pBuff[4] = 0x00000000;
-	pBuff[5] = RASPI_CLOCK_ID_EMMC;
-	pBuff[6] = 0x00000000;
-	pBuff[7] = 0x00000000;
+	for (i = 0; i < nWords; i++)
+		pBuff[5 + i] = pdwValues[i];
+	pBuff[5 + nWords] = 0x00000000;
 
 	// Clean the buffer so the VideoCore reads our request from RAM. The lines
 	// are then clean, so the invalidate after the call will not write stale
 	// request data back over the GPU's response.
-	OEMCacheRangeFlush((VOID *)pBuff, 8 * sizeof(DWORD), CACHE_SYNC_WRITEBACK);
+	OEMCacheRangeFlush((VOID *)pBuff, cbTotal, CACHE_SYNC_WRITEBACK);
 
 	rc = MailboxSendMail(0, MAILBOX_CHAN_PROPARM2VC, ((DWORD)pBuff) >> 4);
 	if (rc == 0)
@@ -577,14 +587,52 @@ BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 
 	// Drop the (clean) cache lines so the reads below come from RAM = the
 	// VideoCore's response, not our cached copy of the request.
-	OEMCacheRangeFlush((VOID *)pBuff, 8 * sizeof(DWORD), CACHE_SYNC_DISCARD);
+	OEMCacheRangeFlush((VOID *)pBuff, cbTotal, CACHE_SYNC_DISCARD);
 
 	// Both the overall response code and the tag's response bit must say OK.
 	if ((pBuff[1] != RASPI_PROPERTY_RESPONSE_OK) ||
 		((pBuff[4] & RASPI_PROPERTY_RESPONSE_OK) == 0))
 		return FALSE;
 
-	dwRate = pBuff[6];              // clock rate in Hz
+	for (i = 0; i < nWords; i++)
+		pdwValues[i] = pBuff[5 + i];
+
+	return TRUE;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  OALIoCtlHalGetEmmcClock
+//
+//  Implements IOCTL_HAL_MY_GET_EMMC_CLOCK. Returns the VideoCore EMMC base
+//  clock in Hz (a single DWORD in the output buffer). The SD host driver needs
+//  this because the BCM2835 Arasan capabilities register reads 0, so the base
+//  clock cannot be read from the controller. We ask the VideoCore over the
+//  property mailbox ("get clock rate", clock id = EMMC).
+//
+#define RASPI_PROPTAG_GET_CLOCK_RATE   0x00030002
+#define RASPI_CLOCK_ID_EMMC            0x00000001
+
+BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	DWORD adwValues[2];
+	DWORD dwRate;
+
+	UNREFERENCED_PARAMETER(code);
+	UNREFERENCED_PARAMETER(pInpBuffer);
+	UNREFERENCED_PARAMETER(inpSize);
+
+	if ((pOutBuffer == 0) || (outSize < sizeof(DWORD)))
+		return FALSE;
+
+	// value[0] = clock id (EMMC), value[1] = rate in Hz (filled by VideoCore)
+	adwValues[0] = RASPI_CLOCK_ID_EMMC;
+	adwValues[1] = 0;
+	if (!OALMailboxPropertyTag(RASPI_PROPTAG_GET_CLOCK_RATE, adwValues, 2))
+		return FALSE;
+
+	dwRate = adwValues[1];
 
 	*(DWORD *)pOutBuffer = dwRate;
 	if (pOutSize != 0)
@@ -595,6 +643,60 @@ BOOL OALIoCtlHalGetEmmcClock(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 
 //------------------------------------------------------------------------------
 //
+//  Function:  OALIoCtlProcessorInfo
+//
+//  Implements IOCTL_PROCESSOR_INFORMATION, which the System control panel uses
+//  for its "Processor" line ("Vendor, Core-Name"). Same behaviour as the common
+//  platform\common\src\common\ioctl\procinfo.c, which this OAL does not link
+//  (no oal_ioctl.lib), with the strings from image_cfg.h. The clock speed (MHz)
+//  is the current ARM clock from the VideoCore (700 MHz on a Pi 1, 1000 MHz on
+//  a Zero), or BSP_SPEED_CPUMHZ if the query fails.
+//
+#define RASPI_CLOCK_ID_ARM             0x00000003
+
+BOOL OALIoCtlProcessorInfo(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+						   VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	PROCESSOR_INFO *pInfo = (PROCESSOR_INFO *)pOutBuffer;
+	DWORD adwValues[2];
+	UINT32 cbCore, cbName, cbVendor;
+
+	if (pOutSize != 0)
+		*pOutSize = sizeof(PROCESSOR_INFO);
+
+	if ((pOutBuffer == 0) || (outSize < sizeof(PROCESSOR_INFO)))
+	{
+		NKSetLastError(ERROR_INSUFFICIENT_BUFFER);
+		return FALSE;
+	}
+
+	cbCore   = (NKwcslen(IOCTL_PROCESSOR_CORE) + 1) * sizeof(WCHAR);
+	cbName   = (NKwcslen(IOCTL_PROCESSOR_NAME) + 1) * sizeof(WCHAR);
+	cbVendor = (NKwcslen(IOCTL_PROCESSOR_VENDOR) + 1) * sizeof(WCHAR);
+	if ((cbCore > sizeof(pInfo->szProcessCore)) ||
+		(cbName > sizeof(pInfo->szProcessorName)) ||
+		(cbVendor > sizeof(pInfo->szVendor)))
+		return FALSE;
+
+	memset(pInfo, 0, sizeof(PROCESSOR_INFO));
+	pInfo->wVersion = 1;
+	memcpy(pInfo->szProcessCore, IOCTL_PROCESSOR_CORE, cbCore);
+	memcpy(pInfo->szProcessorName, IOCTL_PROCESSOR_NAME, cbName);
+	memcpy(pInfo->szVendor, IOCTL_PROCESSOR_VENDOR, cbVendor);
+	pInfo->dwInstructionSet = IOCTL_PROCESSOR_INSTRUCTION_SET;
+
+	// value[0] = clock id (ARM), value[1] = rate in Hz (filled by VideoCore)
+	adwValues[0] = RASPI_CLOCK_ID_ARM;
+	adwValues[1] = 0;
+	if (OALMailboxPropertyTag(RASPI_PROPTAG_GET_CLOCK_RATE, adwValues, 2) &&
+		(adwValues[1] != 0))
+		pInfo->dwClockSpeed = adwValues[1] / 1000000;
+	else
+		pInfo->dwClockSpeed = BSP_SPEED_CPUMHZ;
+
+	return TRUE;
+}
+
 //  Function:  OALIoCtlHalGetMacAddress
 //
 //  Implements IOCTL_HAL_MY_GET_MAC_ADDRESS. Returns the board MAC address the
@@ -620,7 +722,7 @@ BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 	UNREFERENCED_PARAMETER(code);
 	UNREFERENCED_PARAMETER(pInpBuffer);
 	UNREFERENCED_PARAMETER(inpSize);
-
+  
 	if ((pOutBuffer == 0) || (outSize < RASPI_MAC_ADDRESS_LEN))
 		return FALSE;
 

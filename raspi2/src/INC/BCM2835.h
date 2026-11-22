@@ -31,7 +31,27 @@
 #define TIMER_CS_MATCH_0	(1<<0)	//  Set when compare reg 0 matches 
 #define TIMER_CS_MATCH_1	(1<<1)	//  Set when compare reg 1 matches 
 #define TIMER_CS_MATCH_2	(1<<2)	//  Set when compare reg 2 matches 
-#define TIMER_CS_MATCH_3	(1<<3)	//  Set when compare reg 3 matches 
+#define TIMER_CS_MATCH_3	(1<<3)	//  Set when compare reg 3 matches
+
+//----------------------------------------------------------------------
+// Power management / watchdog block (reset and halt)
+//
+// Values from FreeBSD bcm2835_wdog.c and Linux bcm2835_wdt.c (used as
+// documentation). Every write must carry PM_PASSWORD in bits 31:24.
+// Not yet verified on hardware.
+//
+#define PM_BASEOFF			0x00100000
+#define PM_PA_BASE			(PERIPHERAL_PA_BASE + PM_BASEOFF)	// 0x20100000
+
+#define PM_RSTC_OFFSET		0x001C	// Reset control
+#define PM_RSTS_OFFSET		0x0020	// Reset status (boot partition for the firmware)
+#define PM_WDOG_OFFSET		0x0024	// Watchdog timeout, ~16 us ticks
+
+#define PM_PASSWORD					0x5A000000
+#define PM_RSTC_WRCFG_CLR			0xFFFFFFCF	// clears the WRCFG field
+#define PM_RSTC_WRCFG_FULL_RESET	0x00000020	// full reset on watchdog expiry
+#define PM_WDOG_TIME_SET			0x000FFFFF	// timeout field mask
+#define PM_RSTS_HALT				0x00000555	// partition 63: firmware halts
 
 //----------------------------------------------------------------------
 // DMA Controller

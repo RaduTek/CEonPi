@@ -56,8 +56,19 @@ controller so keyboards, mice and USB Ethernet work.
   control in Platform Builder. The README calls it "UART1" but the code uses UART0.
   `UART_readData Error! 500` means a baud-rate mismatch.
 - KITL is on by default (`IMGNOKITL=1` disables it). The boot waits for Platform Builder.
-- The image links at `0x80008000` when `IMGFLASH=1`. `DRAM_SIZE` is 256 MB and `OEMInit` caps
-  main memory at 128 MB, while the Zero has 512 MB.
+- The image links at `0x80008000` when `IMGFLASH=1`. The whole `kernel.img` is resident RAM
+  (about 25 MB for a Checked image). `NKLEN` is only a ceiling (`AUTOSIZE=ON` returns the unused
+  part to RAM).
+- Main memory size (2026-11-22, verified): `OEMInit` (`init.c` `GetMainMemoryEnd`) sets
+  `dwMainMemoryEndAddress` from the firmware "get ARM memory" property tag (`0x00010005`, via
+  `OALMailboxPropertyTag` in `ioctl.c`), falling back to 128 MB if the query fails. The value must be
+  exact: the kernel only shrinks it during its RAM probe, and VideoCore memory is real RAM the probe
+  would accept. `config.bib` `RAM` ends at `0x88000000` as the baseline. Measured: Pi 1 Model B
+  (256 MB) with `gpu_mem=32` -> RAM ends at ~`0x8E000000`, ~199 MB for CE (was ~103 MB); Pi Zero
+  (512 MB) with default GPU memory -> ~422 MB. The `[OAL]` log line from `OEMInit` is not in the KITL
+  log (KITL is not connected yet); confirm from the kernel's `Total Memory Sections` line.
+  `gpu_mem=16` does not boot with only `start.elf`/`fixup.dat` on the card (LED 4 flashes; probably
+  needs the cut-down `start_cd.elf`/`fixup_cd.dat`, untested).
 - Status LED is GPIO16, which is not the Zero's activity LED.
 
 ## USB driver: current state
@@ -155,8 +166,10 @@ controller so keyboards, mice and USB Ethernet work.
   run outside the controller lock.
 - DMA bus address offset (`DmaBusOffset` = `0x40000000`) is verified by M3.
 - KITL serial output costs about 30 ms per line, so do not log per transfer attempt.
-- The boot log shows `OEMInterruptEnable: ERROR enabling unknown SysIntr=11` around the time
-  GWES loads. It is not caused by the USB driver (M1 enabled no interrupt); source not yet found.
+- The old boot-log line `OEMInterruptEnable: ERROR enabling unknown SysIntr=11` was the kernel
+  enabling `SYSINTR_IST_BGT` (`nkintr.h`: `SYSINTR_DEVICES`+3). `intr.c` now accepts every
+  kernel-defined SYSINTR below `SYSINTR_FIRMWARE` (except `RESCHED`) as a software no-op
+  (`IsSoftwareSysIntr`, same pattern as the VM tree's `platform\ipod6g`).
 
 ## USB driver plan
 1. Root port only. Power on, core reset, host init, port power and reset, detect connect and
@@ -251,6 +264,53 @@ ARM1176.
     `OALIoCtlHalGetCacheInfo` over `g_oalCacheInfo`. It was broken (returned FALSE -> `CeGetCacheInfo`
     failed), which a future DMA path would need; it is harmless to PIO.
 
+## Power: idle, restart, shutdown (2026-11-21)
+- **Idle:** `OEMIdle` (`src\oal\oallib\power.c`) does drain-write-buffer + CP15 WFI
+  (`RaspiCpuWaitForInterrupt` in `startup.s`). It accumulates `curridlehigh:curridlelow` in 1 us
+  system-timer counts, with `idleconv`=1000, so `GetIdleTime()` is in ms. Verified: builds, boots,
+  and a power meter shows a small drop at idle.
+- **Restart / shutdown (verified on a Pi 1 Model B):** both go through the PM watchdog block at
+  `0x20100000`.
+  - Verified: a file copied USB -> SD before Suspend survived the halt (checksum matched; the
+    kernel logs `FSREG: Flushing registry` / `FSRAM: Flushing cached file data` before
+    `Calling OEMPowerOff...`). Restart and Power off from `poweroff.exe` work. The board stays up
+    when idle for more than 5 minutes.
+  - `OEMPowerOff`'s own log line never shows: KITL is already powered down by then. The kernel's
+    `Calling OEMPowerOff...` is the last line before the halt.
+  - Registers: `RSTC` +0x1C, `RSTS` +0x20, `WDOG` +0x24, password `0x5A000000`; constants in
+    `BCM2835.h`.
+  - `OALRaspiWatchdogReset(fHalt)` arms `WDOG`=10 ticks and sets `RSTC` to full reset.
+  - With `fHalt` it first ORs `0x555` (partition 63) into `RSTS`, so `bootcode.bin` halts instead
+    of booting.
+  - `IOCTL_HAL_REBOOT` -> `OALIoCtlHalReboot` (table flag `OAL_IOCTL_FLAG_NOCS`, never returns) =
+    restart.
+  - `OEMPowerOff` = halt, so **Suspend is the shutdown** on this BSP. The Explorer Suspend button is
+    re-enabled in `platform.reg`, and `ACSuspendTimeout`/`BattSuspendTimeout` are set to 0 so the PM
+    never suspends (halts) on idle.
+- **Optional apps** (`src\apps`, always built, put in the image by a `BSP_` variable / BSP catalog
+  item, each with a desktop shortcut through `files\*.lnk` + `platform.dat`):
+  - `idlemon.exe` (`BSP_IDLEMON`): CPU load / idle % / `GetIdleTime()`.
+  - `poweroff.exe` (`BSP_POWEROFF`): resource dialog with Restart (`SetSystemPowerState`
+    `POWER_STATE_RESET`, falling back to `IOCTL_HAL_REBOOT`) / Power off (`POWER_STATE_SUSPEND`) /
+    Cancel.
+- CE has no `FrameRect`. Use `Rectangle` with `NULL_BRUSH`.
+
+## RTC (software clock, 2026-11-21)
+- The Pi 1 has no battery-backed RTC. `src\oal\oallib\rtc.c` keeps the time from the 64-bit 1 MHz
+  system timer (`CHI:CLO`, read hi/lo/hi): now = base `FILETIME` + (count - base count) * 10.
+- The base is the image build date (`__DATE__`, 00:00), set lazily on first use (not in `OEMInit`).
+  `OEMSetRealTime` moves the base. Nothing persists across reboots (user decision). It holds local
+  time, as is usual in CE.
+- Alarm: `OEMSetAlarmTime` stores a counter deadline. The Timer 3 tick ISR calls `OALRtcCheckAlarm`
+  when it would otherwise return `SYSINTR_NOP`, and returns `SYSINTR_RTC_ALARM` (= 13,
+  `SYSINTR_DEVICES`+5) once the deadline passes.
+- Pattern from the stock `platform\common\src\common\rtc\timer\rtc.c`: `NKSystemTimeToFileTime` /
+  `NKFileTimeToSystemTime` (declared in `nkexport.h` via `oal.h`) and `INTERRUPTS_ENABLE` around the
+  64-bit state. `IOCTL_HAL_INIT_RTC` stays unregistered, because it would override the build-date
+  base.
+- The CE 7 tree from the VM is visible on the host at `Z:` (`public\`, `platform\`). Check values
+  there instead of guessing.
+  
 ## USB Ethernet driver (SMSC LAN9512, Pi 1 Model B) - working (2026-11-21)
 - **Read `docs/ethernet.md` first.** Source `src\drivers\smsc95xx` (`smsc95xx.dll`): USB client for
   0424:ec00 and an NDIS 5.1 deserialized miniport in the same DLL. After attach it calls

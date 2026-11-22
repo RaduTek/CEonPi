@@ -108,6 +108,64 @@ extern DWORD_PTR __security_cookie_complement;
 // Declaration of kernel page pool parameters for linking purposes
 extern NKPagePoolParameters pagePoolParams;
 
+// VideoCore property mailbox helper (ioctl.c)
+extern BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords);
+
+
+//------------------------------------------------------------------------------
+// Main memory size
+//
+// The firmware splits SDRAM between the ARM (from physical 0 up) and the
+// VideoCore (the top, size set by gpu_mem in config.txt). The "get ARM memory"
+// property tag returns the ARM part as base + size. The kernel uses
+// dwMainMemoryEndAddress as the upper bound of its RAM probe (it can only
+// shrink it), and VideoCore memory is real RAM that the probe would accept, so
+// the value must be exact.
+//
+#define RASPI_PROPTAG_GET_ARM_MEMORY    0x00010005
+
+// Used if the firmware query fails: the old fixed value (128 MB).
+#define RASPI_MEM_FALLBACK_END          (0x80000000 + (128 * 1024 * 1024))
+
+// OEMAddrTable.inc maps 512 MB of cached RAM at 0x80000000, so CE cannot
+// use more than that.
+#define RASPI_MEM_MAX_SIZE              (512 * 1024 * 1024)
+
+// Smallest ARM share we accept as a sane answer.
+#define RASPI_MEM_MIN_SIZE              (64 * 1024 * 1024)
+
+static DWORD GetMainMemoryEnd(void)
+{
+	DWORD adwValues[2];
+	DWORD dwBase, dwSize;
+
+	// value[0] = base address, value[1] = size in bytes (both filled by VC)
+	adwValues[0] = 0;
+	adwValues[1] = 0;
+	if (!OALMailboxPropertyTag(RASPI_PROPTAG_GET_ARM_MEMORY, adwValues, 2))
+	{
+		OALLogSerial(TEXT("[OAL] ***ERROR*** ARM memory query failed, using 128 MB\r\n"));
+		return RASPI_MEM_FALLBACK_END;
+	}
+
+	dwBase = adwValues[0];
+	dwSize = adwValues[1];
+	OALLogSerial(TEXT("[OAL] Firmware ARM memory: base %x size %x (%d MB)\r\n"),
+		dwBase, dwSize, dwSize >> 20);
+
+	// The image is linked to run from physical 0, so the ARM part must start there.
+	if ((dwBase != 0) || (dwSize < RASPI_MEM_MIN_SIZE))
+	{
+		OALLogSerial(TEXT("[OAL] ***ERROR*** Unexpected ARM memory, using 128 MB\r\n"));
+		return RASPI_MEM_FALLBACK_END;
+	}
+
+	if (dwSize > RASPI_MEM_MAX_SIZE)
+		dwSize = RASPI_MEM_MAX_SIZE;
+
+	return 0x80000000 + dwSize;
+}
+
 
 //------------------------------------------------------------------------------
 // Global Variables
@@ -304,7 +362,9 @@ void OEMInit(void)
     KITLIoctl(IOCTL_KITL_STARTUP, NULL, 0, NULL, 0, NULL);
 	//OEMWriteDebugString (TEXT("Return from KITLIoctl (IOCTL_KITL_STARTUP)\r\n"));
 
-	g_pOemGlobal->dwMainMemoryEndAddress = 0x80000000 + (128 * 1024 * 1024);
+	// End of RAM = the ARM's share of SDRAM as reported by the firmware (the
+	// rest belongs to the VideoCore, set by gpu_mem in config.txt).
+	g_pOemGlobal->dwMainMemoryEndAddress = GetMainMemoryEnd();
 
 	OALLogSerial(TEXT("dwMainMemoryEndAddress set to %x\r\n"), g_pOemGlobal->dwMainMemoryEndAddress);
 

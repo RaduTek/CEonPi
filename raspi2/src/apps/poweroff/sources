@@ -1,0 +1,17 @@
+# Shut Down dialog app (src\apps\poweroff, poweroff.exe).
+#
+# Dialog (poweroff.rc) with Restart / Power off / Cancel; see poweroff.cpp.
+# Included in the image only when BSP_POWEROFF=1 (catalog item
+# "Shut Down dialog (poweroff.exe)", or set it in raspi2.bat). Needs GWES.
+
+TARGETNAME=poweroff
+TARGETTYPE=PROGRAM
+EXEENTRY=WinMainCRTStartup
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\corelibc.lib \
+
+SOURCES= \
+    poweroff.cpp \
+    poweroff.rc

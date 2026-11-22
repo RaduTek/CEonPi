@@ -108,6 +108,20 @@ IF BSP_NOSD !
 ENDIF BSP_NOSD !
 ; @CESYSGEN ENDIF CE_MODULES_DEVICE
 
+; CPU idle monitor demo (src\apps\idlemon): shows CPU load, idle % and
+; GetIdleTime(). Optional: set BSP_IDLEMON=1 (catalog item "CPU Idle Monitor
+; (demo)") to include it. platform.dat puts a shortcut on the desktop.
+IF BSP_IDLEMON
+    idlemon.exe        $(_FLATRELEASEDIR)\idlemon.exe                  NK
+ENDIF BSP_IDLEMON
+
+; Shut Down dialog (src\apps\poweroff): Restart / Power off / Cancel.
+; Optional: set BSP_POWEROFF=1 (catalog item "Shut Down dialog
+; (poweroff.exe)") to include it. platform.dat puts a shortcut on the desktop.
+IF BSP_POWEROFF
+    poweroff.exe       $(_FLATRELEASEDIR)\poweroff.exe                 NK
+ENDIF BSP_POWEROFF
+
 ; The FILES section describes any files that stored in the image but not
 ; fixed-up for execution by romimage.exe.  Applications in the FILES section
 ; will be fixed-up at run-time.
@@ -118,4 +132,10 @@ FILES
 ;   Name        Path                                                                            Memory Flags
 ;   ----------  ------------------------------------------------------------------------------    -----------
     font.bmp    $(_FLATRELEASEDIR)\BootConsoleFont.8.bmp		  NK	U
+IF BSP_IDLEMON
+    idlemon.lnk $(_FLATRELEASEDIR)\idlemon.lnk		  NK	SH
+ENDIF BSP_IDLEMON
+IF BSP_POWEROFF
+    poweroff.lnk $(_FLATRELEASEDIR)\poweroff.lnk		  NK	SH
+ENDIF BSP_POWEROFF
 

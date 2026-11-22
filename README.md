@@ -41,6 +41,7 @@ The `config.txt` file is quite short:
     hdmi_force_hotplug=1
     disable_overscan=1
     init_uart_clock=3000000
+    gpu_mem=32
 
 None of these config lines are needed to boot the kernel, but do come in handy:
 
@@ -48,6 +49,7 @@ None of these config lines are needed to boot the kernel, but do come in handy:
 - `disable_overscan=1` makes the image fill the entire screen (needed at 1080p)
 - `init_uart_clock=3000000` sets the UART clock to 3 MHz (the default is 48 MHz)<br>
 needed so the UART works properly at 115200 baud (future investigation into configuring UART clock dividers for 115200 @ 48 MHz needed)
+- `gpu_mem=32` reduce amount of memory allocated to the GPU to free up more memory for general use - may be removed or changed later depending on how the Video driver evolves
 
 `kernel.img` is the built CE kernel together with it's ROM file system. This file is the `NK.nb0` renamed by the `PostMakeimg.bat` script, and can be found in the Platform Builder project output folder. The image is linked at offset `0x80008000` and is loaded in the same way as the Linux kernel.
 
@@ -75,6 +77,8 @@ These are hardware features that are functional
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
 | [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
 | [USB Ethernet](docs/ethernet.md) | Working | SMSC LAN9512 on the Pi 1 Model B: DHCP, IPv4/IPv6, firmware MAC address. ~5.6 MB/s receive, ~3.8 MB/s send (Release build) |
+| Power | Basic | CPU idles with WFI. Restart through the SoC watchdog; Start > Suspend shuts down (firmware halt, power cycle to restart). Optional apps: CPU idle monitor, Shut Down dialog |
+| Real-Time Clock | Software | The Pi has no battery-backed RTC. The clock runs from the 1 MHz system timer and starts at the image build date on each boot; time set in Date/Time lasts until reboot |
 
 [^1]: Low-speed USB devices won't work when connected to a Full-speed USB hub directly attached to the root port.<br>
 Only applies to full-speed USB 1.1 hubs and the Pi Zero, since Pi 1 has a built-in USB 2.0 hub.<br>
@@ -89,7 +93,6 @@ Things I plan on getting working, in order of priority
 | Feature | Comments |
 |-|-|
 | Audio | Support the built-in analog audio output of the Pi 1 model B |
-| Real-Time Clock | Most of the needed code seems to be there, but the clock in the taskbar is frozen at 12:00 |
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |
 | Better Display | Support Composite output, no hardcoded resolution in CE image |
 | SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |

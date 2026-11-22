@@ -11,8 +11,12 @@ TARGETNAME=sdhcbcm
 TARGETTYPE=DYNLINK
 DLLENTRY=_DllEntryCRTStartup
 
-PREPROCESSDEFFILE=1
-NORELEASEDEFFILE=1
+# No PREPROCESSDEFFILE: the .def has no preprocessor directives, and the
+# preprocessed copy (obj\...\sdhcbcm.def) came out EMPTY in the Checked and
+# Release configurations, so those sdhcbcm.dll builds exported nothing and
+# Device Manager refused them ("Failed to load ... dwStatus=0x1" =
+# ERROR_INVALID_FUNCTION, no SHC_Init). Only Debug had the exports. Linking
+# with sdhcbcm.def directly (as dwchci does) avoids that step.
 
 INCLUDES=$(INCLUDES);$(_PUBLICROOT)\common\oak\drivers\sdcard\SDHCDrivers\SDIOStdHC\base
 

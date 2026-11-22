@@ -1,0 +1,7 @@
+# Optional BSP applications. They are always built (cheap); whether each one
+# goes into the image is decided in files\platform.bib by its BSP_ variable.
+
+DIRS= \
+    idlemon \
+    poweroff \
+
