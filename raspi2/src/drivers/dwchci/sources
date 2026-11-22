@@ -18,5 +18,10 @@ TARGETLIBS= \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib
 
+# hcd2lib.lib is a prebuilt PUBLIC lib, so take it from the public tree. In a
+# BSP build $(_COMMONOAKROOT) is the OS design's cesysgen\oak, where the lib
+# only exists after sysgen has copied the USB component for that build
+# configuration; otherwise the build fails with "U1073: don't know how to
+# make ...cesysgen\oak\lib\...\hcd2lib.lib". Same fix as sdhcbcm (SDHCBase.lib).
 SOURCELIBS= \
-    $(_COMMONOAKROOT)\lib\$(_CPUINDPATH)\hcd2lib.lib
+    $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\hcd2lib.lib
