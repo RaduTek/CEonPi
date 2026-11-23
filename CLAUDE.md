@@ -328,7 +328,28 @@ ARM1176.
   `EmulatedBltSelect16`): BLACKNESS/WHITENESS, solid PATCOPY, text (0xAAF0), same-format SRCCOPY/SRCAND/
   SRCPAINT/SRCINVERT, 1/4 bpp -> 16 copies. Everything else (DSTINVERT, format conversion `pConvert`
   e.g. 24/32 bpp DIB -> screen, stretch, transparent, alpha) falls to the generic per-pixel path:
-  ~2 Mpix/s (the Invert result), i.e. ~1 s per full 1080p screen.
+  ~2 Mpix/s (the Invert result), i.e. ~1 s per full 1080p screen. Measured with the extended gdibench
+  (D1 driver, kpix/s): Up565 42839, Up24 2055, Up32 1862, Stretch 1659, Transp 1767, AlphaC 1003,
+  AlphaP 740 - this is why IE7 takes ~1 s to paint a page.
+- `GPE::EmulatedBlt` (`gpe\swblt.cpp` `SelectBlt`) already tries three libraries inside `gpe.lib`:
+  `FastBltSelect` (`emulrotate\fastblt.cpp`: 32->565 copy, 32->565 and 16->16 alpha, 16->16
+  transparent, ...), `EmulatedBltSelectNN`, and GenBlt (`genblt`, a run-time blit code generator; it
+  skips alpha and transparent). **`FastBltSelect` returns at once unless the global `g_fUseFastBlt`
+  (C++ `?g_fUseFastBlt@@3HA`, default FALSE, nothing in the public tree sets it) is TRUE**; the driver
+  sets it (registry `FastBlt`). GenBlt's ARM generator is compiled only under `USE_GENERATED_BLTS`
+  (`cpulibs\arm\genblt_cpu\genblt_arm.cpp`); whether the shipped lib has it is unknown, so the driver
+  logs `g_CpuFuncs.pfnPCodeToCpuCode`. GPE fills a surface's mask palette (`FormatPtr()`) from the
+  XLATEOBJ on first use (`ddi_if.cpp` `SetSurfaceFormat`), which the 565 checks rely on.
+- **FastBlt measured (2026-11-23, Pi 1 Model B):** log `vc4disp: FastBlt on, GenBlt code generator off`
+  (the shipped ARMv6 GenBlt has no code generator). kpix/s off -> on: Stretch 1659 -> 11943, Transp
+  1767 -> 20525, AlphaC 1003 -> 5954, AlphaP 740 -> 3862. Up24/Up32/Invert unchanged (no FastBlt
+  routine; FastBlt's 32->565 copy wants a source with an alpha mask, plain 32 bpp DIBs lack one), so
+  `vc4blt.cpp` adds the driver's own 24/32 bpp -> 565 copies and 16 bpp DSTINVERT (registry
+  `DriverBlt`), gated by probing GPE's colour converter with known colours (`ConverterIs888To565`).
+- **DriverBlt verified (2026-11-23, Pi 1 Model B):** kpix/s before -> after: Up24 2082 -> 16023, Up32
+  1882 -> 13290, Invert 2145 -> 26607. gdibench's three source tiles (565/24/32 bpp) match, UI and
+  IE7 render correctly, IE7 paints pages much faster. Remaining: some lag between mouse-wheel scroll and
+  the screen update in IE7 (not investigated).
 - Plan: D0 copy + clean-up (no behaviour change);
   D1 speed up drawing (GDI reads from uncached memory: cached shadow surface or write-combined
   mapping); D2 driver-owned mode set through a generic mailbox property-tag IOCTL (16/32 bpp, blanking

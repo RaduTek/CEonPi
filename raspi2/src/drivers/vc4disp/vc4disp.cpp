@@ -47,6 +47,7 @@
 #include <ceddk.h>
 #include <pkfuncs.h>
 #include <ddhal.h>
+#include <genblt.h>
 #include "vc4disp.h"
 
 //------------------------------------------------------------------------------
@@ -61,11 +62,41 @@ static GPE *g_pGPE;
 static ULONG g_bitMasks[] = { 0, 0, 0 };
 
 //------------------------------------------------------------------------------
-// External functions
+// External functions and data
 
 BOOL APIENTRY GPEEnableDriver(
    ULONG version, ULONG cj, DRVENABLEDATA *pData, ENGCALLBACKS *pCallbacks
 );
+
+// gpe.lib (emulrotate, fastblt.cpp): enables Microsoft's optimized software
+// blits (FastBltSelect) for 32 bpp -> RGB565 copies, 16 bpp transparent
+// copies and 32/16 bpp -> RGB565 alpha blends. Off by default in gpe.lib.
+extern BOOL g_fUseFastBlt;
+
+// gpe.lib (genblt): the CPU-specific GeneratedBlt functions; a NULL code
+// generator means GeneratedBltSelect never engages
+extern GenBltCpuFuncs g_CpuFuncs;
+
+//------------------------------------------------------------------------------
+//
+//  Function:  ReadRegDword
+//
+//  Reads a DWORD value from an open key, or returns dwDefault.
+//
+static DWORD ReadRegDword(HKEY hKey, LPCWSTR pszName, DWORD dwDefault)
+{
+    DWORD dwType, dwSize, dwValue;
+
+    if (hKey == NULL) return dwDefault;
+    dwSize = sizeof(dwValue);
+    if (RegQueryValueEx(
+            hKey, pszName, NULL, &dwType, (LPBYTE)&dwValue, &dwSize
+        ) != ERROR_SUCCESS || dwType != REG_DWORD
+    ) {
+        return dwDefault;
+    }
+    return dwValue;
+}
 
 //------------------------------------------------------------------------------
 //
@@ -75,8 +106,8 @@ BOOL APIENTRY GPEEnableDriver(
 //
 BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
 {
-    HKEY hKey;
-    DWORD dwCachedFb = 1, dwType, dwSize, dwValue;
+    HKEY hKey = NULL;
+    DWORD dwCachedFb, dwFastBlt, dwDriverBlt;
 
     DEBUGMSG(GPE_ZONE_PDD, (
         L"+DisplayInit(%s, %d)\r\n", pszInstance, monitors
@@ -88,20 +119,26 @@ BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
             HKEY_LOCAL_MACHINE,
             (pszInstance != NULL) ? pszInstance : VC4DISP_REG_KEY,
             0, 0, &hKey
-        ) == ERROR_SUCCESS
+        ) != ERROR_SUCCESS
     ) {
-        dwSize = sizeof(dwValue);
-        if (RegQueryValueEx(
-                hKey, VC4DISP_REG_CACHEDFB, NULL, &dwType, (LPBYTE)&dwValue,
-                &dwSize
-            ) == ERROR_SUCCESS && dwType == REG_DWORD
-        ) {
-            dwCachedFb = dwValue;
-        }
-        RegCloseKey(hKey);
+        hKey = NULL;
     }
+    dwCachedFb = ReadRegDword(hKey, VC4DISP_REG_CACHEDFB, 1);
+    dwFastBlt = ReadRegDword(hKey, VC4DISP_REG_FASTBLT, 1);
+    dwDriverBlt = ReadRegDword(hKey, VC4DISP_REG_DRIVERBLT, 1);
+    if (hKey != NULL) RegCloseKey(hKey);
 
-    g_pGPE = new Vc4GPE(dwCachedFb != 0);
+    // Must be set before the first blit
+    g_fUseFastBlt = (dwFastBlt != 0);
+
+    // The GPE constructor runs GenBltInitialize
+    g_pGPE = new Vc4GPE(dwCachedFb != 0, dwDriverBlt != 0);
+
+    RETAILMSG(1, (L"vc4disp: FastBlt %s, DriverBlt %s, GenBlt code generator %s\r\n",
+        g_fUseFastBlt ? L"on" : L"off",
+        (dwDriverBlt != 0) ? L"on" : L"off",
+        (g_CpuFuncs.pfnPCodeToCpuCode != NULL) ? L"on" : L"off"
+    ));
 
     DEBUGMSG(GPE_ZONE_PDD, (L"-DisplayInit(rc = %d)\r\n", g_pGPE != NULL));
     return (g_pGPE != NULL);
@@ -147,11 +184,12 @@ GPE* GetGPE()
 //
 //  Constructor
 //
-Vc4GPE::Vc4GPE(BOOL fCachedFb)
+Vc4GPE::Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt)
 {
     m_pPrimarySurface = NULL;
     memset(&m_gpeMode, 0, sizeof(m_gpeMode));
     m_fCachedFb = fCachedFb;
+    m_fDriverBlt = fDriverBlt;
     m_cursorVisible = FALSE;
     m_cursorDisabled = TRUE;
     m_cursorForcedOff = FALSE;
@@ -599,8 +637,9 @@ SCODE Vc4GPE::Line(GPELineParms *pLineParms, EGPEPhase phase)
 //
 //  Method:  BltPrepare
 //
-//  All blits are emulated. Hides the software cursor when the source or
-//  destination rectangle on the primary surface overlaps it.
+//  Blits go to GPE's emulation (gpe.lib picks its own fast routines) or to
+//  ours (SelectDriverBlt, vc4blt.cpp). Hides the software cursor when the
+//  source or destination rectangle on the primary surface overlaps it.
 //
 SCODE Vc4GPE::BltPrepare(GPEBltParms *pBltParms)
 {
@@ -661,6 +700,9 @@ SCODE Vc4GPE::BltPrepare(GPEBltParms *pBltParms)
             m_cursorForcedOff = TRUE;
         }
     }
+
+    // Our own routines for blits gpe.lib only has a slow path for
+    SelectDriverBlt(pBltParms);
 
     return S_OK;
 }

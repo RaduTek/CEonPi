@@ -33,6 +33,12 @@
 // DWORD: 1 (default) draw through the cached framebuffer view, 0 uncached
 #define VC4DISP_REG_CACHEDFB        L"CachedFrameBuffer"
 
+// DWORD: 1 (default) use gpe.lib's optimized FastBlt routines, 0 do not
+#define VC4DISP_REG_FASTBLT         L"FastBlt"
+
+// DWORD: 1 (default) use vc4disp's own blits (vc4blt.cpp), 0 do not
+#define VC4DISP_REG_DRIVERBLT       L"DriverBlt"
+
 // CE ARM static mappings: uncached view = cached view + 0x20000000
 #define VC4DISP_STATIC_CACHED       0x80000000
 #define VC4DISP_STATIC_UNCACHED     0xA0000000
@@ -45,7 +51,7 @@ class Vc4GPE : public GPE
 {
 
 public:
-    Vc4GPE(BOOL fCachedFb);
+    Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt);
     virtual ~Vc4GPE();
 
     virtual int InVBlank();
@@ -74,6 +80,9 @@ private:
     // write to the primary surface must be followed by FlushRect
     BOOL   m_fCachedFb;
 
+    // TRUE: BltPrepare may route blits to the routines in vc4blt.cpp
+    BOOL   m_fDriverBlt;
+
     // Software cursor
     BOOL   m_cursorDisabled;
     BOOL   m_cursorVisible;
@@ -88,6 +97,12 @@ private:
     // Helper functions
     UINT8* QueryModeInfo(int modeNumber);
     VOID FlushRect(const RECTL *pRect);
+
+    // vc4blt.cpp
+    VOID SelectDriverBlt(GPEBltParms *pParms);
+    SCODE BltCopy32To565(GPEBltParms *pParms);
+    SCODE BltCopy24To565(GPEBltParms *pParms);
+    SCODE BltInvert16(GPEBltParms *pParms);
     VOID CursorOn();
     VOID CursorOff();
     SCODE WrappedEmulatedLine(GPELineParms*);

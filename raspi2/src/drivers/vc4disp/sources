@@ -21,7 +21,8 @@ DLLENTRY=_DllMainCRTStartup
 WINCEOEM=1
 
 SOURCES=\
-    vc4disp.cpp
+    vc4disp.cpp \
+    vc4blt.cpp
 
 TARGETLIBS= \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \

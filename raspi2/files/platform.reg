@@ -39,9 +39,16 @@ IF BSP_VC4DISP
 ; CachedFrameBuffer: 1 = draw through the cached view of the framebuffer and
 ; write the touched rows back after each operation (fast screen reads:
 ; scrolling, window moves, cursor); 0 = draw uncached, as raspiBasic_ddi does.
+; FastBlt: 1 = turn on Microsoft's optimized software blits in gpe.lib (32 bpp
+; -> RGB565 copies, transparent copies, alpha blends; off by default in
+; gpe.lib); 0 = leave them off.
+; DriverBlt: 1 = vc4disp's own routines for 24/32 bpp -> RGB565 copies and
+; DSTINVERT (vc4blt.cpp); 0 = leave those to gpe.lib's slow generic path.
 [HKEY_LOCAL_MACHINE\Drivers\Display\vc4disp\Config]
     "DisplayDll"="vc4disp.dll"
     "CachedFrameBuffer"=dword:1
+    "FastBlt"=dword:1
+    "DriverBlt"=dword:1
 
 [HKEY_LOCAL_MACHINE\System\GDI\Drivers]
     "Display"="vc4disp.dll"
