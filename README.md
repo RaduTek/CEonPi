@@ -24,59 +24,6 @@ Images with KITL disabled (`IMGNOKITL=1`) boot very fast, around 10 seconds from
 **AI assistance has been used to develop these drivers.** This is merely a hobby project, and I only have basic knowledge of both the CE driver stack and the actual hardware of the Pi.<br>
 This README document is mostly handwritten, but architecture docs under `docs/` are predominantly AI generated.
 
-## Building the image
-
-**TBA**: Description of how to install WEC7 Platform Builder and get the project ready
-
-## Installation
-
-This is very easy. An SD card of any size is needed, formatted to a single FAT partition (FAT32 for cards over 2 GB). Every image build (Make Run-Time Image) creates an `sdcard` folder in the Platform Builder release directory with everything the card needs; copy the **contents** of that folder to the root of the card:
-
-    bootcode.bin       Raspberry Pi firmware
-    start.elf          Raspberry Pi firmware
-    fixup.dat          Raspberry Pi firmware
-    start_cd.elf       cut-down firmware, used with gpu_mem=16
-    fixup_cd.dat       cut-down firmware, used with gpu_mem=16
-    LICENCE.broadcom   firmware licence
-    config.txt
-    kernel.img
-
-If SD card persistence is enabled, `Windows`, `Program Files` and other folders will also be part of the `sdcard` folder. The SD card becomes the root file system, and the files above will be visible in My Device. To fix this, set the system FAT file attribute to all the system boot files.
-
-The firmware files and `config.txt` live in [raspi2/files/sdboot](raspi2/files/sdboot); the firmware comes from the official Raspberry Pi firmware repository ([raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)) and is redistributed under its licence (`LICENCE.broadcom`). I was a little surprised that the latest work just fine, I expected I'd have to dig up the old boot files from 2013.
-
-The `config.txt` file is quite short:
-
-    hdmi_force_hotplug=1
-    disable_overscan=1
-    init_uart_clock=3000000
-    gpu_mem=32
-
-None of these config lines are needed to boot the kernel, but do come in handy:
-
-- `hdmi_force_hotplug=1` makes the display work even if it's not attached at power on time
-- `disable_overscan=1` makes the image fill the entire screen (needed at 1080p)
-- `init_uart_clock=3000000` sets the UART clock to 3 MHz (the default is 48 MHz)<br>
-needed so the UART works properly at 115200 baud (future investigation into configuring UART clock dividers for 115200 @ 48 MHz needed)
-- `gpu_mem=32` reduce amount of memory allocated to the GPU to free up more memory for general use - may be removed or changed later depending on how the Video driver evolves
-
-### Composite (TV) output
-
-To use the composite TV output instead of HDMI, replace the first two lines of `config.txt` with:
-
-    hdmi_ignore_hotplug=1
-    sdtv_mode=2
-    sdtv_aspect=1
-
-- `hdmi_ignore_hotplug=1` uses composite even if an HDMI display is connected. `hdmi_force_hotplug=1` must be removed, as it keeps the output on HDMI
-- `sdtv_mode` selects the TV standard: `0` NTSC, `1` Japanese NTSC, `2` PAL, `3` Brazilian PAL
-- `sdtv_aspect` selects the aspect ratio: `1` 4:3, `3` 16:9
-- `disable_overscan=1` is left out, so the firmware's default border keeps the edges of the desktop visible on a TV. Put it back if your TV shows the whole picture
-
-No changes to the CE image are needed: the BSP asks the firmware for the display size at boot, so the desktop runs at the TV resolution. The composite signal comes out of the yellow RCA jack on the Pi 1 Model B, the 4-pole 3.5 mm jack on the B+/A+, and the unpopulated "TV" pads on the Pi Zero.
-
-`kernel.img` is the built CE kernel together with it's ROM file system. It is a copy of `NK.nb0` made by `PostMakeimg.bat` (through `mksdcard.js`); `NK.nb0` itself stays in the release directory. With the "SD card as root file system" catalog item, the `sdcard` folder also holds the desktop shortcuts and startup folders (see [docs/sdroot.md](docs/sdroot.md)). The image is linked at offset `0x80008000` and is loaded in the same way as the Linux kernel.
-
 ## Board support
 
 The original project was only tested on the original Raspberry Pi Model B, since that was the only board that existed at the time. Luckily, the Pi Zero uses the same SoC, and the original BSP has booted to a desktop just fine with no modifications.
@@ -88,30 +35,9 @@ Most of the work was done on the Pi Zero W. The Ethernet driver was developed an
 | Pi Zero (W) | HDMI, USB host |
 | Pi 1 Model B | HDMI, USB host, Ethernet, 3.5mm Audio |
 
-## Catalog items
+## Installation
 
-The BSP contains a bunch of optional add-ins that can be enabled using the Catalog Items View. Each one sets a `BSP_` environment variable (shown in brackets) and, through [raspi2/cebasecesysgen.bat](raspi2/cebasecesysgen.bat), makes sysgen add the Core OS components it needs ("Selects" below). These are added at sysgen time and may not show as ticked in the Catalog Items View. Items that need another BSP item say so ("Needs").
-
-The hardware drivers are opt-in too: an OS design without the USB host, Ethernet or SD host items gets none of those drivers. The sample OS design (`RaspiCE`) selects all three.
-
-- **Applications**
-    - **CPU Idle Monitor (demo)** (`BSP_IDLEMON`) - shows CPU load, the % of idle CPU time and `GetIdleTime()`, with a desktop shortcut
-    - **Shut Down dialog (poweroff.exe)** (`BSP_POWEROFF`) - convenient way of shutting down or restarting the OS, with a desktop shortcut
-    - **Audio test (audiotest.exe)** (`BSP_AUDIOTEST`) - plays left/right test tones in several formats and reports timing; `audiotest file.wav` plays a WAV file <br> Selects Waveform Audio. Needs an audio driver
-    - **Volume tray icon (voltray.exe)** (`BSP_VOLTRAY`) - speaker icon in the taskbar with a volume slider and a Mute box, started from the Startup folder <br> Selects Waveform Audio, Common Control and Standard Shell. Needs an audio driver
-- **Debugging**
-    - **On-screen debug output** (`BSP_USEVIDASDEBUGPORT`) - shows the kernel debug output on the screen during boot. Always on in images with KITL, so this is for images without it (Release) <br> Built into the OAL: rebuild the BSP, not just the image, after changing it
-- **Device Drivers\Audio**
-    - **Analog audio (Pi 1 3.5 mm jack)** (`BSP_AUDIO`) - PWM audio driver for the 3.5 mm jack of the Pi 1 (the Pi Zero has no jack), see [docs/audio.md](docs/audio.md) <br> Selects Waveform Audio
-- **Device Drivers\Ethernet**
-    - **USB Ethernet (SMSC LAN95xx)** (`BSP_ETHERNET`) - driver for the Ethernet chip built into the Pi 1 Model B/B+ (the Pi Zero has none), see [docs/ethernet.md](docs/ethernet.md) <br> Selects USB Host Support and Wired Local Area Network (NDIS, TCP/IP). Needs the "USB host controller" item
-- **Device Drivers\SD**
-    - **SD card host controller (Arasan eMMC)** (`BSP_SDHOST`) - mounts the boot SD card as `\Storage Card`, see [docs/sdhost.md](docs/sdhost.md) <br> Selects SD Bus Driver, SD Memory, SD Standard Host Controller, FAT File System and Partition Driver
-- **Device Drivers\USB**
-    - **USB host controller (DWC OTG)** (`BSP_USBHOST`) - USB host driver for keyboards, mice, hubs, mass storage and USB Ethernet, see [docs/usb.md](docs/usb.md) <br> Selects USB Host Support and USB HID Keyboard and Mouse. Add other class drivers (e.g. USB Storage Class Driver) yourself
-- **Storage**
-    - **SD card as root file system** (`BSP_SDROOT`) - mounts the SD card at `\` instead of `\Storage Card`, so files persist across reboots (and the registry too with the "ROM-only File System" item), see [docs/sdroot.md](docs/sdroot.md) <br> Selects SD Bus Driver, SD Memory, SD Standard Host Controller, FAT File System and Partition Driver. Needs the "SD card host controller" item
-    - **Load optional modules from the SD card** (`BSP_SDOFFLOAD`) - leaves some binaries (IE7, network tools) out of kernel.img and loads them from the SD card instead, to reduce kernel.img size and RAM use <br> Selects SD Bus Driver, SD Memory, SD Standard Host Controller, FAT File System and Partition Driver. Needs the "SD card as root file system" and "SD card host controller" items
+See [docs/installation.md](docs/installation.md)
 
 ## Hardware driver support
 
