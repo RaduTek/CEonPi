@@ -165,7 +165,10 @@ BOOL OEMIoControl(DWORD dwIoControlCode, LPVOID lpInBuf, DWORD nInBufSize, PVOID
     UINT32 dwIndex;
 
 #ifdef DEBUG
-	NKDbgPrintfW(L"OEMIoControl: Code 0x%x Fn:%d\r\n", dwIoControlCode, (dwIoControlCode >> 2) & 0x0fff);
+	// Not for the mailbox property IOCTL: the display driver calls it on every
+	// cursor move, and each KITL debug line costs about 30 ms.
+	if (dwIoControlCode != IOCTL_HAL_MY_MAILBOX_PROPERTY)
+		NKDbgPrintfW(L"OEMIoControl: Code 0x%x Fn:%d\r\n", dwIoControlCode, (dwIoControlCode >> 2) & 0x0fff);
 #endif
 
     OALMSG(OAL_IOCTL&&OAL_FUNC, (L"+OEMIoControl(0x%x, 0x%x, %d, 0x%x, %d, 0x%x)\r\n", 
