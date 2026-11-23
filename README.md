@@ -4,8 +4,7 @@ This project is a Board Support Package (BSP) for the BCM2835-based Raspberry Pi
 
 <img src="docs/images/splash_logo_2x.png" alt="Windows Embedded Compact 7 + Raspberry Pi splash boot logo" width="400"><br>
 
-<img src="docs/images/pi_1_ce_logo.jpg" alt="Raspberry Pi 1 Model B with a 3D-printed CE logo on top of it" width="400">
-<img src="docs/images/pi_zero_booted.jpg" alt="Raspberry Pi Zero booted to WEC7 desktop" width="400"><br>
+<img src="docs/images/pi_1_ce_logo.jpg" alt="Raspberry Pi 1 Model B with a 3D-printed CE logo on top of it" width="400">&nbsp;&nbsp;<img src="docs/images/pi_zero_booted.jpg" alt="Raspberry Pi Zero booted to WEC7 desktop" width="400"><br>
 
 <small>[3D model for the CE logo](https://www.printables.com/model/1675195-windows-ce-logo)</small>
 
