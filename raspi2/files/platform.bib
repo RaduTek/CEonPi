@@ -106,6 +106,18 @@ ENDIF BSP_NOUSB !
 IF BSP_NOSD !
     sdhcbcm.dll        $(_FLATRELEASEDIR)\sdhcbcm.dll                  NK     SHK
 ENDIF BSP_NOSD !
+
+; Analog audio driver (src\drivers\pwmaudio) for the Pi 1 3.5 mm jack.
+; Optional: set BSP_AUDIO=1 (catalog item "Analog audio (Pi 1 3.5 mm jack)").
+; Needs the Waveform Audio catalog item (waveapi.dll).
+; @CESYSGEN IF CE_MODULES_WAVEAPI
+IF BSP_NOAUDIO !
+IF BSP_AUDIO
+    pwmaudio.dll       $(_FLATRELEASEDIR)\pwmaudio.dll                 NK     SHK
+ENDIF BSP_AUDIO
+ENDIF BSP_NOAUDIO !
+; @CESYSGEN ENDIF CE_MODULES_WAVEAPI
+
 ; @CESYSGEN ENDIF CE_MODULES_DEVICE
 
 ; CPU idle monitor demo (src\apps\idlemon): shows CPU load, idle % and
@@ -121,6 +133,29 @@ ENDIF BSP_IDLEMON
 IF BSP_POWEROFF
     poweroff.exe       $(_FLATRELEASEDIR)\poweroff.exe                 NK
 ENDIF BSP_POWEROFF
+
+; Audio test (src\apps\audiotest): waveOut tones and PlaySound. Optional:
+; set BSP_AUDIOTEST=1 (catalog item "Audio test (audiotest.exe)").
+; platform.dat puts a shortcut on the desktop.
+; @CESYSGEN IF CE_MODULES_WAVEAPI
+IF BSP_NOAUDIO !
+IF BSP_AUDIOTEST
+    audiotest.exe      $(_FLATRELEASEDIR)\audiotest.exe                NK
+ENDIF BSP_AUDIOTEST
+ENDIF BSP_NOAUDIO !
+; @CESYSGEN ENDIF CE_MODULES_WAVEAPI
+
+; Volume tray icon (src\apps\voltray): speaker icon in the taskbar, click for
+; a volume slider and Mute. Optional: set BSP_VOLTRAY=1 (catalog item "Volume
+; tray icon (voltray.exe)"). platform.dat starts it from \Windows\Startup (no
+; desktop shortcut).
+; @CESYSGEN IF CE_MODULES_WAVEAPI
+IF BSP_NOAUDIO !
+IF BSP_VOLTRAY
+    voltray.exe        $(_FLATRELEASEDIR)\voltray.exe                  NK
+ENDIF BSP_VOLTRAY
+ENDIF BSP_NOAUDIO !
+; @CESYSGEN ENDIF CE_MODULES_WAVEAPI
 
 ; Modules loaded from the SD card instead of the image (catalog item "Load
 ; optional modules from the SD card", BSP_SDOFFLOAD=1, which needs
@@ -184,4 +219,14 @@ ENDIF BSP_IDLEMON
 IF BSP_POWEROFF
     poweroff.lnk $(_FLATRELEASEDIR)\poweroff.lnk		  NK	SH
 ENDIF BSP_POWEROFF
+; @CESYSGEN IF CE_MODULES_WAVEAPI
+IF BSP_NOAUDIO !
+IF BSP_AUDIOTEST
+    audiotest.lnk $(_FLATRELEASEDIR)\audiotest.lnk		  NK	SH
+ENDIF BSP_AUDIOTEST
+IF BSP_VOLTRAY
+    voltray.lnk $(_FLATRELEASEDIR)\voltray.lnk		  NK	SH
+ENDIF BSP_VOLTRAY
+ENDIF BSP_NOAUDIO !
+; @CESYSGEN ENDIF CE_MODULES_WAVEAPI
 

@@ -252,6 +252,97 @@
 #define CLOCK_MGR2_UVA_BASE	(PERIPHERAL_UVA_BASE + 0x00101080)   // 0x20101070
 
 //----------------------------------------------------------------------
+// PWM audio (3.5 mm jack on the Pi 1): PWM block, its clock, DMA bits.
+//
+// Values from the BCM2835 ARM Peripherals document and the Circle and
+// FreeBSD drivers (used as documentation). Verified on a Pi 1 Model B by
+// pwmaudio (docs\audio.md): pins, PWM clock, FIFO mode, DMA DREQ 5.
+//
+// Pi 1 Model B/B+/A+ jack: GPIO40 = PWM0 (channel 1, left),
+// GPIO45 = PWM1 (channel 2, right), both function ALT0. Left/right
+// verified by ear on a Pi 1 Model B.
+//
+#define PWM_BASEOFF			0x0020C000
+#define PWM_PA_BASE			(PERIPHERAL_PA_BASE + PWM_BASEOFF)	// 0x2020C000
+#define PWM_BUS_BASE		0x7E20C000		// VideoCore bus address (for DMA)
+
+#define PWM_CTL_OFFSET		0x0000	// Control
+#define PWM_STA_OFFSET		0x0004	// Status
+#define PWM_DMAC_OFFSET		0x0008	// DMA configuration
+#define PWM_RNG1_OFFSET		0x0010	// Channel 1 range
+#define PWM_DAT1_OFFSET		0x0014	// Channel 1 data
+#define PWM_FIF1_OFFSET		0x0018	// FIFO input (both channels)
+#define PWM_RNG2_OFFSET		0x0020	// Channel 2 range
+#define PWM_DAT2_OFFSET		0x0024	// Channel 2 data
+
+#define PWM_CTL_PWEN1		(1 << 0)	// channel 1 enable
+#define PWM_CTL_MODE1		(1 << 1)	// 1 = serializer mode
+#define PWM_CTL_RPTL1		(1 << 2)	// repeat last data when FIFO empty
+#define PWM_CTL_SBIT1		(1 << 3)	// silence bit
+#define PWM_CTL_POLA1		(1 << 4)	// invert polarity
+#define PWM_CTL_USEF1		(1 << 5)	// use FIFO
+#define PWM_CTL_CLRF1		(1 << 6)	// clear FIFO (write 1, self clearing)
+#define PWM_CTL_MSEN1		(1 << 7)	// 1 = mark-space mode
+#define PWM_CTL_PWEN2		(1 << 8)
+#define PWM_CTL_MODE2		(1 << 9)
+#define PWM_CTL_RPTL2		(1 << 10)
+#define PWM_CTL_SBIT2		(1 << 11)
+#define PWM_CTL_POLA2		(1 << 12)
+#define PWM_CTL_USEF2		(1 << 13)
+#define PWM_CTL_MSEN2		(1 << 15)
+
+#define PWM_STA_FULL1		(1 << 0)	// FIFO full
+#define PWM_STA_EMPT1		(1 << 1)	// FIFO empty
+#define PWM_STA_WERR1		(1 << 2)	// FIFO write error (write 1 to clear)
+#define PWM_STA_RERR1		(1 << 3)	// FIFO read error (write 1 to clear)
+#define PWM_STA_GAPO1		(1 << 4)	// channel 1 gap (write 1 to clear)
+#define PWM_STA_GAPO2		(1 << 5)	// channel 2 gap (write 1 to clear)
+#define PWM_STA_BERR		(1 << 8)	// bus error (write 1 to clear)
+#define PWM_STA_STA1		(1 << 9)	// channel 1 transmitting
+#define PWM_STA_STA2		(1 << 10)	// channel 2 transmitting
+#define PWM_STA_ERRORS		(PWM_STA_WERR1 | PWM_STA_RERR1 | PWM_STA_GAPO1 | PWM_STA_GAPO2 | PWM_STA_BERR)
+
+#define PWM_DMAC_ENAB		(1u << 31)	// DMA DREQ enable
+#define PWM_DMAC_PANIC(n)	(((n) & 0xFF) << 8)	// panic threshold
+#define PWM_DMAC_DREQ(n)	((n) & 0xFF)		// DREQ threshold
+
+// Clock manager: PWM clock (CM_PWMCTL / CM_PWMDIV). Every write must carry
+// CM_PASSWORD in bits 31:24.
+#define CM_BASEOFF			0x00101000
+#define CM_PA_BASE			(PERIPHERAL_PA_BASE + CM_BASEOFF)	// 0x20101000
+#define CM_PWMCTL_OFFSET	0x00A0
+#define CM_PWMDIV_OFFSET	0x00A4
+
+#define CM_PASSWORD			0x5A000000
+#define CM_CTL_SRC_OSC		1			// 19.2 MHz crystal
+#define CM_CTL_SRC_PLLD		6			// PLLD, 500 MHz on the Pi 1 (assumed)
+#define CM_CTL_ENAB			(1 << 4)
+#define CM_CTL_KILL			(1 << 5)
+#define CM_CTL_BUSY			(1 << 7)
+#define CM_DIV_DIVI(n)		(((n) & 0xFFF) << 12)	// integer divisor
+
+// DMA channel register bits (see also DMA.h)
+#define DMA_CS_ACTIVE		(1 << 0)
+#define DMA_CS_END			(1 << 1)	// write 1 to clear
+#define DMA_CS_INT			(1 << 2)	// write 1 to clear
+#define DMA_CS_ERROR		(1 << 8)
+#define DMA_CS_PRIORITY(n)	(((n) & 0xF) << 16)
+#define DMA_CS_PANIC_PRIORITY(n)	(((n) & 0xF) << 20)
+#define DMA_CS_WAIT_FOR_OUTSTANDING_WRITES	(1 << 28)
+#define DMA_CS_ABORT		(1 << 30)
+#define DMA_CS_RESET		(1u << 31)
+
+#define DMA_TI_INTEN		(1 << 0)
+#define DMA_TI_WAIT_RESP	(1 << 3)
+#define DMA_TI_DEST_INC		(1 << 4)
+#define DMA_TI_DEST_DREQ	(1 << 6)
+#define DMA_TI_SRC_INC		(1 << 8)
+#define DMA_TI_SRC_DREQ		(1 << 10)
+#define DMA_TI_PERMAP(n)	(((n) & 0x1F) << 16)
+
+#define DMA_DREQ_PWM		5			// peripheral map number of the PWM
+
+//----------------------------------------------------------------------
 // GPIO Registers
 //
 #define GPIO_BASEOFF		0x00200000	

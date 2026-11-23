@@ -176,6 +176,13 @@ BOOL OEMInterruptEnable(DWORD dwSysIntr, LPVOID pvData, DWORD cbData)
 		}
 		break;
 
+	case SYSINTR_AUDIO:
+		{
+			// PWM audio DMA channel (AUDIO_DMA_CHANNEL), first IRQ register.
+			*pIrqEnabIrq1Reg = RASPI_IRQR1_AUDIODMA;
+		}
+		break;
+
 	case SYSINTR_RESCHED:
 		{
 			*pIrqEnabIrq1Reg = RASPI_IRQR1_TIMER3;
@@ -220,6 +227,12 @@ void OEMInterruptDisable(DWORD dwSysIntr)
 	case SYSINTR_SDHC:
 		{
 			*pIrqDisabIrq2Reg = RASPI_IRQR2_VC_ARASANSDIO;
+		}
+		break;
+
+	case SYSINTR_AUDIO:
+		{
+			*pIrqDisabIrq1Reg = RASPI_IRQR1_AUDIODMA;
 		}
 		break;
 
@@ -276,6 +289,12 @@ void OEMInterruptDone(DWORD dwSysIntr)
 	case SYSINTR_SDHC:
 		{
 			*pIrqEnabIrq2Reg = RASPI_IRQR2_VC_ARASANSDIO;
+		}
+		break;
+
+	case SYSINTR_AUDIO:
+		{
+			*pIrqEnabIrq1Reg = RASPI_IRQR1_AUDIODMA;
 		}
 		break;
 
@@ -493,6 +512,16 @@ VidCON_WriteDebugByteExtern('~');
 				//VidCON_WriteDebugByteExtern('@');
 
 			}
+		}
+		// ------------------------------------
+		// PWM audio DMA channel. Mask it until the audio IST has cleared
+		// the channel's INT flag; OEMInterruptDone re-enables it. A tick
+		// pending at the same time is served first and this IRQ re-fires.
+		// ------------------------------------
+		else if (dwIrq1Pend & RASPI_IRQR1_AUDIODMA)
+		{
+			*pIrqDisabIrq1Reg = RASPI_IRQR1_AUDIODMA;
+			SysIntr = SYSINTR_AUDIO;
 		}
 		else
 		{

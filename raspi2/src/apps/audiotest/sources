@@ -1,0 +1,22 @@
+# waveOut test for the Pi 1 analog audio driver (src\apps\audiotest,
+# audiotest.exe). Plays test tones in several formats and reports timing and
+# position; "audiotest <file.wav>" plays a file with PlaySound. Included in
+# the image with BSP_AUDIOTEST=1 (catalog item "Audio test (audiotest.exe)").
+#
+# The waveOut and PlaySound exports exist in coredll.lib only when the OS
+# design has Waveform Audio (SYSGEN_AUDIO), so skip the build without it.
+
+!IF "$(SYSGEN_AUDIO)" != "1"
+SKIPBUILD=1
+!ENDIF
+
+TARGETNAME=audiotest
+TARGETTYPE=PROGRAM
+EXEENTRY=WinMainCRTStartup
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\corelibc.lib \
+
+SOURCES= \
+    audiotest.cpp

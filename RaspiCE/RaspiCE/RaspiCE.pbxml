@@ -30,6 +30,8 @@
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_storemgr_cpl" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_fsromonly" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_fsreghive" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_audio" />
+    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_dshow_waveout" />
   </FeatureCollection>
   <ConfigurationCollection Name="Configurations" EnforceUniqueItems="False">
     <Configuration Name="Item" TargetBinFilename="nk.bin" BuildType="Debug" FriendlyName="raspi2 ARMV6 Debug">
@@ -37,6 +39,8 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdRoot:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdOffload:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:Audio:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:VolTray:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
@@ -54,6 +58,8 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdRoot:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdOffload:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:Audio:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:VolTray:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
@@ -73,6 +79,8 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:PowerOff:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdRoot:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdOffload:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:Audio:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:VolTray:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">

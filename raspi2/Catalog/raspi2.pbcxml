@@ -27,6 +27,9 @@
     <BspItemId>Item:CEonPi:PowerOff:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:SdRoot:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:SdOffload:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:Audio:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:AudioTest:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:VolTray:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:Boling Consulting Inc.:BSPTemplateInstructions:BSPTemplate_raspi2">
     <Title>!BSP Template Instructions - Start Here!</Title>
@@ -92,6 +95,39 @@
     <SourceCode>
       <Title>SD OFFLOAD LIST AND SCRIPTS</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\FILES</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:Audio:raspi2">
+    <Title>Analog audio (Pi 1 3.5 mm jack)</Title>
+    <Description>PWM audio driver (pwmaudio.dll) for the 3.5 mm jack of the Pi 1 Model B/B+/A+ (GPIO40/45 PWM fed by DMA). The Pi Zero has no jack. Requires the Waveform Audio catalog item (SYSGEN_AUDIO). Sets BSP_AUDIO=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_AUDIO</Variable>
+    <Location>Device Drivers\Audio</Location>
+    <SourceCode>
+      <Title>PWM AUDIO DRIVER SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\DRIVERS\PWMAUDIO</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:AudioTest:raspi2">
+    <Title>Audio test (audiotest.exe)</Title>
+    <Description>waveOut test app with a desktop shortcut: plays left/right test tones in several formats and reports timing and position; "audiotest file.wav" plays a file with PlaySound. Needs the Waveform Audio catalog item (SYSGEN_AUDIO) and an audio driver. Sets BSP_AUDIOTEST=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_AUDIOTEST</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>AUDIO TEST SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\AUDIOTEST</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:VolTray:raspi2">
+    <Title>Volume tray icon (voltray.exe)</Title>
+    <Description>Speaker icon in the taskbar notification area: click it for a volume slider and a Mute check box (right click: Exit). Started from the Startup folder; no desktop shortcut. Needs the Waveform Audio catalog item (SYSGEN_AUDIO), an audio driver and a shell with a taskbar. Sets BSP_VOLTRAY=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_VOLTRAY</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>VOLUME TRAY ICON SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\VOLTRAY</Path>
     </SourceCode>
   </Item>
 </CatalogFile>

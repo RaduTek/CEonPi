@@ -31,8 +31,16 @@ extern "C" {
 #define SYSINTR_UART0        (SYSINTR_FIRMWARE+0)
 #define SYSINTR_USBHOST      (SYSINTR_FIRMWARE+1)
 #define SYSINTR_SDHC         (SYSINTR_FIRMWARE+2)   // Arasan eMMC, GPU IRQ 62
+#define SYSINTR_AUDIO        (SYSINTR_FIRMWARE+3)   // PWM audio DMA channel, GPU IRQ 20
 
-#define SYSINTR_ENDOFSTATIC  (SYSINTR_FIRMWARE+2)
+#define SYSINTR_ENDOFSTATIC  (SYSINTR_FIRMWARE+3)
+
+// DMA channel used by the PWM audio driver (pwmaudio.dll). Fixed because the
+// OAL routes its interrupt (GPU IRQ 16 + channel) to SYSINTR_AUDIO. Channel 4
+// is a full (non-lite) channel and is in the ARM-usable mask (0x7F35) that the
+// firmware gives Linux. Change RASPI_IRQR1_AUDIODMA together with it.
+#define AUDIO_DMA_CHANNEL    4
+#define RASPI_IRQR1_AUDIODMA (1 << (16 + AUDIO_DMA_CHANNEL))
 
 
 // Discovered in the Raspberry Pi forums...

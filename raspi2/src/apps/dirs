@@ -4,4 +4,6 @@
 DIRS= \
     idlemon \
     poweroff \
+    audiotest \
+    voltray \
 
