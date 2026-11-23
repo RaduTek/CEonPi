@@ -40,7 +40,6 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Ethernet:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdHost:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Vc4Disp:raspi2" />
-        <Feature Name="Item" CatalogItemId="Item:CEonPi:GdiBench:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
@@ -64,7 +63,6 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Ethernet:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdHost:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Vc4Disp:raspi2" />
-        <Feature Name="Item" CatalogItemId="Item:CEonPi:GdiBench:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
@@ -90,7 +88,6 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Ethernet:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdHost:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Vc4Disp:raspi2" />
-        <Feature Name="Item" CatalogItemId="Item:CEonPi:GdiBench:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
