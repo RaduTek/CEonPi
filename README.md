@@ -76,6 +76,7 @@ These are hardware features that are functional
 | Feature | Driver State | Comments |
 |-|-|-|
 | UART | Basic | Used for KITL debugger connection with Visual Studio |
+| [Audio](docs/audio.md) | Complete | Support PWM audio output on the Pi 1 Model B with dithering enhancements for quality |
 | Display | Basic | Fixed resolution, no acceleration whatsoever |
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
 | [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
@@ -95,7 +96,6 @@ Things I plan on getting working, in order of priority
 
 | Feature | Comments |
 |-|-|
-| Audio | Support the built-in analog audio output of the Pi 1 model B |
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |
 | Better Display | Support Composite output, no hardcoded resolution in CE image |
 | SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |
