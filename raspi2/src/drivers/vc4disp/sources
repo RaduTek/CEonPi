@@ -24,7 +24,8 @@ SOURCES=\
     vc4disp.cpp \
     vc4blt.cpp \
     vc4cursor.cpp \
-    vc4dma.cpp
+    vc4dma.cpp \
+    vc4escape.cpp
 
 TARGETLIBS= \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \

@@ -52,6 +52,10 @@ IF BSP_VC4DISP
     "FastBlt"=dword:1
     "DriverBlt"=dword:1
     "HwCursor"=dword:1
+; HwCursorInterval: shortest time between two hardware cursor moves, in ms.
+; A cursor thread sends only the newest position, so a fast mouse costs at
+; most one firmware call per interval (each call busy-waits in the OAL).
+    "HwCursorInterval"=dword:8
 ; DmaBlt: 1 = large screen-to-screen copies and screen fills by DMA channel
 ; DISP_DMA_CHANNEL (vc4dma.cpp; turns itself off and logs on any DMA error);
 ; 0 = CPU only. DmaMinPixels: smallest rectangle that uses DMA (0x7FFFFFFF =
@@ -66,6 +70,12 @@ IF BSP_VC4DISP
 ; DmaCopy: 1 = screen-to-screen copies by DMA too; 0 = fills only (with
 ; DmaBurst 0, DMA copies measured slower than the CPU: 52 vs 81 Mpix/s).
     "DmaCopy"=dword:0
+; RawFrameBuffer: 1 = answer the GETRAWFRAMEBUFFER escape (vc4escape.cpp):
+; apps such as TCPMP get the framebuffer mapped into their process and draw
+; video straight to it; 0 = off. RawFbWriteCombine: 1 = map it
+; write-combining (falls back to uncached), 0 = uncached.
+    "RawFrameBuffer"=dword:1
+    "RawFbWriteCombine"=dword:1
 
 [HKEY_LOCAL_MACHINE\System\GDI\Drivers]
     "Display"="vc4disp.dll"

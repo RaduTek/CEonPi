@@ -380,6 +380,32 @@ ARM1176.
   unsafe on this silicon in our setup (cause unproven: misaligned wide bursts, or two channels
   contending); burst 0 with audio running is fine. **Decision: D4 = DMA fills only, burst 0**
   (code defaults `DmaBlt` 1, `DmaCopy` 0, `DmaBurst` 0).
+- **RawFrameBuffer (in progress, 2026-11-23):** `vc4escape.cpp` answers `GETRAWFRAMEBUFFER`
+  (`0x00020001`, Windows Mobile escape; not in the CE 7 headers) by mapping the framebuffer into the
+  calling process (`VirtualAllocEx` + `VirtualCopyEx` `PAGE_PHYSICAL` uncached, then
+  `VirtualProtectEx` `PAGE_WRITECOMBINE`; one mapping per call). Once handed out, `FlushRect` cleans
+  *and invalidates*. Motivation: TCPMP (`C:\Dev\TCPMP`, `common/overlay/overlay_raw.c`) ranks outputs
+  DirectDraw (+100), RawFrameBuffer (+95), GAPI (+50), GDI; its GDI path converts and scales into a
+  DIB of the output size and then `BitBlt`s it unscaled, which at 1920x1080 costs ~48 ms/frame for the
+  copy alone, so 360p video only keeps up at 100% zoom. DirectDraw is not worth doing without a
+  hardware YUV overlay.
+- **RawFrameBuffer verified (2026-11-23, Pi 1 Model B):** TCPMP picks it automatically and plays
+  better, but 360p scaled to 1920x1080 is still not real time (fine at lower desktop resolutions).
+- **Cursor moves froze video (fix in progress):** `MovePointer` sent "Set cursor state" synchronously
+  for every mouse report from GWES's input thread, and the OAL's `MailboxGetMail`
+  (`src\Common\VidConDebugOut\mailbox.cpp`) **busy-waits** for the firmware's reply inside
+  `KernelIoControl`, at that thread's high priority, starving lower-priority threads (TCPMP
+  decode) and holding GWES locks (GDI mode). Fix: `MovePointer` only queues the newest position; a
+  cursor thread (priority 110) sends it at most once per `HwCursorInterval` ms (default 8) and logs
+  call timing (`vc4disp: cursor: N firmware calls for M moves, call avg X us, max Y us`).
+  **Measured: each "Set cursor state" call takes ~2.2 ms (max ~3.2 ms)** of OAL busy-waiting; ~1.3
+  moves per call at 8 ms, so ~20-25% CPU at priority 110 while the mouse moves. Video still stutters,
+  a little less. Next: a non-spinning (asynchronous) mailbox path in the OAL. Also seen:
+  `VirtualProtectEx` `PAGE_WRITECOMBINE` fails, so the RawFrameBuffer mapping stays uncached.
+- **Future goal (user, 2026-11-23): VCHIQ.** The real video acceleration path: HVS YUV planes
+  (hardware scaling and colour conversion through dispmanx) and hardware decode (MMAL/OpenMAX) are
+  only reachable through the firmware's VCHIQ interface, not the mailbox. A DirectDraw overlay would
+  sit on top of that.
 - **D2 dropped (user decision, 2026-11-23):** the firmware already picks the native resolution per
   display and `config.txt` can override it, which beats registry settings plus an image rebuild.
   Depth stays **16 bpp RGB565**, fixed at compile time by `VID_BITSPP` (`image_cfg.h`) and requested by

@@ -42,6 +42,10 @@
 // DWORD: 1 (default) use the VideoCore hardware cursor, 0 software cursor
 #define VC4DISP_REG_HWCURSOR        L"HwCursor"
 
+// DWORD: shortest time between two hardware cursor moves in ms (default 8);
+// moves in between are merged
+#define VC4DISP_REG_HWCURSORINTERVAL L"HwCursorInterval"
+
 // DMA blits (vc4dma.cpp): DmaBlt 1 (default) on / 0 off; DmaMinPixels
 // smallest rectangle (pixels) worth a DMA transfer; DmaBurst DMA burst
 // length (0..15); DmaBusOffset physical -> VideoCore bus address offset
@@ -54,17 +58,36 @@
 // (with single transfers DMA copies were slower than the CPU)
 #define VC4DISP_REG_DMACOPY         L"DmaCopy"
 
+// RawFrameBuffer escape (vc4escape.cpp): RawFrameBuffer 1 (default) on / 0
+// off; RawFbWriteCombine 1 (default) map write-combining, 0 uncached
+#define VC4DISP_REG_RAWFB           L"RawFrameBuffer"
+#define VC4DISP_REG_RAWFBWC         L"RawFbWriteCombine"
+
 // Driver settings, read from the registry by DisplayInit
 typedef struct {
     BOOL  fCachedFb;
     BOOL  fDriverBlt;
     BOOL  fHwCursor;
+    DWORD dwHwCursorInterval;
     BOOL  fDmaBlt;
     BOOL  fDmaCopy;
+    BOOL  fRawFb;
+    BOOL  fRawFbWriteCombine;
     DWORD dwDmaMinPixels;
     DWORD dwDmaBurst;
     DWORD dwDmaBusOffset;
 } VC4DISP_SETTINGS;
+
+// Windows Mobile RawFrameBufferInfo (GETRAWFRAMEBUFFER escape output)
+typedef struct {
+    WORD  wFormat;
+    WORD  wBPP;
+    VOID *pFramePointer;
+    int   cxStride;
+    int   cyStride;
+    int   cxPixels;
+    int   cyPixels;
+} VC4_RAWFRAMEBUFFERINFO;
 
 // One BCM2835 DMA control block (32-byte aligned)
 typedef struct {
@@ -109,6 +132,9 @@ public:
 
     virtual VOID PowerHandler(BOOL bOff);
 
+    virtual ULONG DrvEscape(SURFOBJ *pso, ULONG iEsc, ULONG cjIn, PVOID pvIn,
+        ULONG cjOut, PVOID pvOut);
+
 private:
 
     // Actual mode info (width, height, bpp, frequency, and format)
@@ -140,6 +166,25 @@ private:
     DWORD* m_pHwCursorBuf;
     DWORD  m_dwHwCursorBus;
 
+    // Cursor thread: MovePointer only queues the newest position, the thread
+    // sends it to the firmware (the OAL busy-waits for the reply), at most
+    // once per m_dwCursorIntervalMs
+    CRITICAL_SECTION m_csCursor;
+    HANDLE m_hCursorThread;
+    HANDLE m_hCursorEvent;
+    BOOL   m_fCursorExit;
+    BOOL   m_fCursorPending;
+    BOOL   m_fCursorVisible;
+    int    m_xCursor;
+    int    m_yCursor;
+    BOOL   m_fHwCursorFailed;
+    DWORD  m_dwCursorIntervalMs;
+    volatile DWORD *m_pSysTimer;    // BCM2835 system timer (1 MHz)
+    DWORD  m_nCursorMoves;          // statistics since the last log line
+    DWORD  m_nCursorCalls;
+    DWORD  m_dwCursorUsTotal;
+    DWORD  m_dwCursorUsMax;
+
     // DMA blits (vc4dma.cpp): ready once DmaInit has set up the channel
     BOOL   m_fDmaEnabled;
     BOOL   m_fDmaReady;
@@ -159,6 +204,12 @@ private:
     BOOL   m_fDmaIntr;
     DWORD  m_nDmaLogged;            // DMA operations logged so far
 
+    // RawFrameBuffer escape (vc4escape.cpp). m_fRawFbGiven: a process has a
+    // direct pointer, so FlushRect must also invalidate
+    BOOL   m_fRawFbEnabled;
+    BOOL   m_fRawFbWriteCombine;
+    BOOL   m_fRawFbGiven;
+
     // Helper functions
     UINT8* QueryModeInfo(int modeNumber);
     VOID FlushRect(const RECTL *pRect);
@@ -175,6 +226,10 @@ private:
     BOOL HwSetPointerShape(GPESurf *pMask, int xHotspot, int yHotspot,
         int xSize, int ySize);
     BOOL HwSetPointerState(BOOL fVisible, int x, int y);
+    VOID HwQueuePointerState(BOOL fVisible, int x, int y);
+    VOID HwCursorDeinit();
+    VOID CursorThread();
+    static DWORD WINAPI CursorThreadProc(LPVOID pContext);
 
     // vc4dma.cpp
     VOID DmaInit();
@@ -184,6 +239,9 @@ private:
     BOOL DmaSelect(GPEBltParms *pParms);
     SCODE BltDmaCopy(GPEBltParms *pParms);
     SCODE BltDmaFill(GPEBltParms *pParms);
+
+    // vc4escape.cpp
+    BOOL GetRawFrameBuffer(VC4_RAWFRAMEBUFFERINFO *pInfo);
     VOID CursorOn();
     VOID CursorOff();
     SCODE WrappedEmulatedLine(GPELineParms*);

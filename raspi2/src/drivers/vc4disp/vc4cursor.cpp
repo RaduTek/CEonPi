@@ -26,6 +26,14 @@
 // means "invert the screen", which an overlay cannot do; it is drawn black
 // (the I-beam over text, usually on a light background).
 //
+// Cursor moves: the OAL busy-waits for each mailbox reply, and GWES calls
+// MovePointer for every mouse report (125-1000 per second) from its input
+// thread, which starved other threads (video froze while the mouse moved).
+// So MovePointer only stores the newest position; a cursor thread sends it,
+// at most once per HwCursorInterval ms, merging the moves in between. It
+// also times the firmware calls (1 MHz system timer) and logs a summary
+// every VC4_CURSOR_LOG_CALLS calls.
+//
 // Registry value HwCursor=0 keeps the software cursor.
 //
 #define DDI 1
@@ -47,6 +55,16 @@
 #define CURSOR_BUF_BYTES        (CURSOR_MAX * CURSOR_MAX * 4)
 
 #define BUS_UNCACHED_ALIAS      0xC0000000
+
+// Cursor thread priority: above applications, below GWES's input threads
+#define VC4_CURSOR_THREAD_PRIO  110
+
+// Calls between two statistics lines (each KITL line costs about 30 ms)
+#define VC4_CURSOR_LOG_CALLS    512
+
+// BCM2835 system timer: counter low word at +4, 1 MHz
+#define SYSTIMER_PA_BASE        0x20003000
+#define SYSTIMER_CLO_DWORD      1
 
 #define ARGB_TRANSPARENT        0x00000000
 #define ARGB_BLACK              0xFF000000
@@ -97,7 +115,141 @@ BOOL Vc4GPE::HwCursorInit()
         return FALSE;
     }
     m_dwHwCursorBus = BUS_UNCACHED_ALIAS | pa;
+
+    // System timer for the call statistics (optional)
+    {
+        PHYSICAL_ADDRESS phys;
+        phys.QuadPart = SYSTIMER_PA_BASE;
+        m_pSysTimer = (volatile DWORD*)MmMapIoSpace(phys, PAGE_SIZE, FALSE);
+    }
+
+    // Cursor thread
+    m_hCursorEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (m_hCursorEvent != NULL) {
+        m_hCursorThread = CreateThread(NULL, 0, CursorThreadProc, this, 0, NULL);
+    }
+    if (m_hCursorThread == NULL) {
+        RETAILMSG(1, (L"vc4disp: cursor thread creation failed\r\n"));
+        HwCursorDeinit();
+        FreePhysMem(m_pHwCursorBuf);
+        m_pHwCursorBuf = NULL;
+        return FALSE;
+    }
+    CeSetThreadPriority(m_hCursorThread, VC4_CURSOR_THREAD_PRIO);
     return TRUE;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  HwCursorDeinit
+//
+//  Stops the cursor thread and releases what HwCursorInit set up (except the
+//  image buffer, which the destructor frees).
+//
+VOID Vc4GPE::HwCursorDeinit()
+{
+    if (m_hCursorThread != NULL) {
+        m_fCursorExit = TRUE;
+        SetEvent(m_hCursorEvent);
+        WaitForSingleObject(m_hCursorThread, 1000);
+        CloseHandle(m_hCursorThread);
+        m_hCursorThread = NULL;
+    }
+    if (m_hCursorEvent != NULL) {
+        CloseHandle(m_hCursorEvent);
+        m_hCursorEvent = NULL;
+    }
+    if (m_pSysTimer != NULL) {
+        MmUnmapIoSpace((PVOID)m_pSysTimer, PAGE_SIZE);
+        m_pSysTimer = NULL;
+    }
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  HwQueuePointerState
+//
+//  Records the newest cursor state for the cursor thread and wakes it.
+//  Returns at once.
+//
+VOID Vc4GPE::HwQueuePointerState(BOOL fVisible, int x, int y)
+{
+    EnterCriticalSection(&m_csCursor);
+    m_fCursorVisible = fVisible;
+    m_xCursor = x;
+    m_yCursor = y;
+    m_fCursorPending = TRUE;
+    m_nCursorMoves++;
+    LeaveCriticalSection(&m_csCursor);
+
+    if (m_hCursorEvent != NULL) SetEvent(m_hCursorEvent);
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  CursorThreadProc / CursorThread
+//
+//  Sends the newest queued state, then waits HwCursorInterval ms before the
+//  next one, so a fast mouse costs at most one firmware call per interval.
+//
+DWORD WINAPI Vc4GPE::CursorThreadProc(LPVOID pContext)
+{
+    ((Vc4GPE*)pContext)->CursorThread();
+    return 0;
+}
+
+VOID Vc4GPE::CursorThread()
+{
+    BOOL fVisible, fOk;
+    int x, y;
+    DWORD dwStart, dwUs, nMoves;
+
+    while (!m_fCursorExit) {
+        WaitForSingleObject(m_hCursorEvent, INFINITE);
+
+        while (!m_fCursorExit && !m_fHwCursorFailed) {
+            EnterCriticalSection(&m_csCursor);
+            if (!m_fCursorPending) {
+                LeaveCriticalSection(&m_csCursor);
+                break;
+            }
+            fVisible = m_fCursorVisible;
+            x = m_xCursor;
+            y = m_yCursor;
+            m_fCursorPending = FALSE;
+            LeaveCriticalSection(&m_csCursor);
+
+            dwStart = (m_pSysTimer != NULL) ? m_pSysTimer[SYSTIMER_CLO_DWORD] : 0;
+            fOk = HwSetPointerState(fVisible, x, y);
+            dwUs = (m_pSysTimer != NULL) ? m_pSysTimer[SYSTIMER_CLO_DWORD] - dwStart : 0;
+
+            if (!fOk) {
+                // MovePointer switches to the software cursor
+                m_fHwCursorFailed = TRUE;
+                break;
+            }
+
+            m_nCursorCalls++;
+            m_dwCursorUsTotal += dwUs;
+            if (dwUs > m_dwCursorUsMax) m_dwCursorUsMax = dwUs;
+            if (m_nCursorCalls >= VC4_CURSOR_LOG_CALLS) {
+                EnterCriticalSection(&m_csCursor);
+                nMoves = m_nCursorMoves;
+                m_nCursorMoves = 0;
+                LeaveCriticalSection(&m_csCursor);
+                RETAILMSG(1, (L"vc4disp: cursor: %d firmware calls for %d moves, "
+                    L"call avg %d us, max %d us, interval %d ms\r\n",
+                    m_nCursorCalls, nMoves, m_dwCursorUsTotal / m_nCursorCalls,
+                    m_dwCursorUsMax, m_dwCursorIntervalMs
+                ));
+                m_nCursorCalls = 0;
+                m_dwCursorUsTotal = 0;
+                m_dwCursorUsMax = 0;
+            }
+
+            if (m_dwCursorIntervalMs != 0) Sleep(m_dwCursorIntervalMs);
+        }
+    }
 }
 
 //------------------------------------------------------------------------------

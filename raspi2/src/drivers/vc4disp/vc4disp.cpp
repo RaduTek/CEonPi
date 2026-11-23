@@ -128,9 +128,12 @@ BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
     dwFastBlt = ReadRegDword(hKey, VC4DISP_REG_FASTBLT, 1);
     settings.fDriverBlt = ReadRegDword(hKey, VC4DISP_REG_DRIVERBLT, 1) != 0;
     settings.fHwCursor = ReadRegDword(hKey, VC4DISP_REG_HWCURSOR, 1) != 0;
+    settings.dwHwCursorInterval = ReadRegDword(hKey, VC4DISP_REG_HWCURSORINTERVAL, 8);
     // DMA fills with single transfers: verified; copies and bursts are not
     settings.fDmaBlt = ReadRegDword(hKey, VC4DISP_REG_DMABLT, 1) != 0;
     settings.fDmaCopy = ReadRegDword(hKey, VC4DISP_REG_DMACOPY, 0) != 0;
+    settings.fRawFb = ReadRegDword(hKey, VC4DISP_REG_RAWFB, 1) != 0;
+    settings.fRawFbWriteCombine = ReadRegDword(hKey, VC4DISP_REG_RAWFBWC, 1) != 0;
     settings.dwDmaMinPixels = ReadRegDword(hKey, VC4DISP_REG_DMAMINPIXELS, 16384);
     // Burst 8 lost the HDMI signal (bus offset 0x40000000) or hung the
     // system (0xC0000000) on a Pi 1 B; single transfers (0) work
@@ -215,6 +218,21 @@ Vc4GPE::Vc4GPE(const VC4DISP_SETTINGS *pSettings)
     m_fHwCursorLogged = FALSE;
     m_pHwCursorBuf = NULL;
     m_dwHwCursorBus = 0;
+    InitializeCriticalSection(&m_csCursor);
+    m_hCursorThread = NULL;
+    m_hCursorEvent = NULL;
+    m_fCursorExit = FALSE;
+    m_fCursorPending = FALSE;
+    m_fCursorVisible = FALSE;
+    m_xCursor = 0;
+    m_yCursor = 0;
+    m_fHwCursorFailed = FALSE;
+    m_dwCursorIntervalMs = pSettings->dwHwCursorInterval;
+    m_pSysTimer = NULL;
+    m_nCursorMoves = 0;
+    m_nCursorCalls = 0;
+    m_dwCursorUsTotal = 0;
+    m_dwCursorUsMax = 0;
     m_fDmaEnabled = pSettings->fDmaBlt;
     m_fDmaReady = FALSE;
     m_fDmaCopy = pSettings->fDmaCopy;
@@ -232,6 +250,9 @@ Vc4GPE::Vc4GPE(const VC4DISP_SETTINGS *pSettings)
     m_hDmaEvent = NULL;
     m_fDmaIntr = FALSE;
     m_nDmaLogged = 0;
+    m_fRawFbEnabled = pSettings->fRawFb;
+    m_fRawFbWriteCombine = pSettings->fRawFbWriteCombine;
+    m_fRawFbGiven = FALSE;
 }
 
 //------------------------------------------------------------------------------
@@ -245,10 +266,12 @@ Vc4GPE::~Vc4GPE()
     delete [] m_cursorStore; m_cursorStore = NULL;
     delete [] m_cursorXor; m_cursorXor = NULL;
     delete [] m_cursorAnd; m_cursorAnd = NULL;
+    HwCursorDeinit();
     if (m_pHwCursorBuf != NULL) {
         FreePhysMem(m_pHwCursorBuf);
         m_pHwCursorBuf = NULL;
     }
+    DeleteCriticalSection(&m_csCursor);
 }
 
 //------------------------------------------------------------------------------
@@ -504,7 +527,8 @@ SCODE Vc4GPE::AllocSurface(
 //  Method:  FlushRect
 //
 //  Writes the cached framebuffer rows covering pRect (exclusive right/bottom,
-//  any order) back to memory, so the display shows them. NULL = whole cache.
+//  any order) back to memory, so the display shows them, and drops them from
+//  the cache too once a RawFrameBuffer pointer exists. NULL = whole cache.
 //  The OAL cleans the whole 16 KB L1 D-cache instead of walking lines once
 //  the range is larger than the cache, so big rectangles cost no more than
 //  one full clean.
@@ -513,11 +537,16 @@ VOID Vc4GPE::FlushRect(const RECTL *pRect)
 {
     LONG left, top, right, bottom, stride, bytesPerPixel;
     UCHAR *pStart, *pEnd;
+    DWORD dwFlush;
 
     if (!m_fCachedFb || m_pPrimarySurface == NULL) return;
 
+    // Write back; also invalidate once a process writes the framebuffer
+    // directly (RawFrameBuffer), so later reads see its pixels
+    dwFlush = m_fRawFbGiven ? CACHE_SYNC_DISCARD : CACHE_SYNC_WRITEBACK;
+
     if (pRect == NULL) {
-        CacheRangeFlush(NULL, 0, CACHE_SYNC_WRITEBACK);
+        CacheRangeFlush(NULL, 0, dwFlush);
         return;
     }
 
@@ -536,7 +565,7 @@ VOID Vc4GPE::FlushRect(const RECTL *pRect)
     stride = m_pPrimarySurface->Stride();
     bytesPerPixel = (m_gpeMode.Bpp + 7) >> 3;
     if (stride <= 0 || bytesPerPixel <= 0) {
-        CacheRangeFlush(NULL, 0, CACHE_SYNC_WRITEBACK);
+        CacheRangeFlush(NULL, 0, dwFlush);
         return;
     }
 
@@ -545,7 +574,7 @@ VOID Vc4GPE::FlushRect(const RECTL *pRect)
         left * bytesPerPixel;
     pEnd = (UCHAR*)m_pPrimarySurface->Buffer() + (bottom - 1) * stride +
         right * bytesPerPixel;
-    CacheRangeFlush(pStart, (DWORD)(pEnd - pStart), CACHE_SYNC_WRITEBACK);
+    CacheRangeFlush(pStart, (DWORD)(pEnd - pStart), dwFlush);
 }
 
 //------------------------------------------------------------------------------
@@ -924,7 +953,7 @@ SCODE Vc4GPE::SetPointerShape(
 
     if (pMask == NULL) {
         m_cursorDisabled = TRUE;
-        if (m_fHwCursorActive) HwSetPointerState(FALSE, 0, 0);
+        if (m_fHwCursorActive) HwQueuePointerState(FALSE, 0, 0);
         goto cleanUp;
     }
 
@@ -942,7 +971,7 @@ SCODE Vc4GPE::SetPointerShape(
         goto cleanUp;
     }
     if (m_fHwCursorActive) {
-        HwSetPointerState(FALSE, 0, 0);
+        HwQueuePointerState(FALSE, 0, 0);
         m_fHwCursorActive = FALSE;
     }
 
@@ -1012,12 +1041,15 @@ cleanUp:
 SCODE Vc4GPE::MovePointer(int x, int y)
 {
     if (m_fHwCursorActive) {
-        if (!HwSetPointerState(x != -1 || y != -1, x, y)) {
-            // Give up on the hardware cursor; the software one takes over
-            // with the next shape GWES sets
+        if (m_fHwCursorFailed) {
+            // The cursor thread had a call rejected: give up on the hardware
+            // cursor; the software one takes over with the next shape
             m_fHwCursorActive = FALSE;
             m_fHwCursorEnabled = FALSE;
+            return S_OK;
         }
+        // Returns at once; the cursor thread talks to the firmware
+        HwQueuePointerState(x != -1 || y != -1, x, y);
         return S_OK;
     }
 
