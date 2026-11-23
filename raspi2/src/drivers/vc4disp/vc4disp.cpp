@@ -233,6 +233,9 @@ Vc4GPE::Vc4GPE(const VC4DISP_SETTINGS *pSettings)
     m_nCursorCalls = 0;
     m_dwCursorUsTotal = 0;
     m_dwCursorUsMax = 0;
+    m_pHwCursorMsg = NULL;
+    m_dwHwCursorMsgBus = 0;
+    m_fMailboxAsync = TRUE;
     m_fDmaEnabled = pSettings->fDmaBlt;
     m_fDmaReady = FALSE;
     m_fDmaCopy = pSettings->fDmaCopy;

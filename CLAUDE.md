@@ -400,7 +400,19 @@ ARM1176.
   call timing (`vc4disp: cursor: N firmware calls for M moves, call avg X us, max Y us`).
   **Measured: each "Set cursor state" call takes ~2.2 ms (max ~3.2 ms)** of OAL busy-waiting; ~1.3
   moves per call at 8 ms, so ~20-25% CPU at priority 110 while the mouse moves. Video still stutters,
-  a little less. Next: a non-spinning (asynchronous) mailbox path in the OAL. Also seen:
+  a little less. Next: a non-spinning (asynchronous) mailbox path in the OAL (written, untested):
+  `IOCTL_HAL_MY_MAILBOX_ASYNC` SEND (OAL checks the caller's complete message in its own uncached
+  buffer, posts it, returns) / POLL (reads arrived replies without waiting) / ABANDON. Replies carry
+  the message address (data bits), so `OALPropertyWaitReply` in every synchronous path only takes its
+  own reply and marks the pending async one as done if it sees it (`MailboxPollMail`, new in
+  `mailbox.cpp`). The cursor thread posts "Set cursor state" and polls with `Sleep(1)`; falls back to
+  synchronous calls if the IOCTL is missing or a reply times out (100 ms). **Verified (2026-11-23):**
+  calls run `async` (~1.9-2.0 ms each, spent sleeping), no `OAL mailbox: dropped` lines, MAC, SD and
+  cursor fine; video stutter while moving the mouse is reduced to acceptable levels (not gone).
+  TCPMP's `PLAYER.EXE` logs an `Undefined Instruction` exception in `common.dll` after
+  `ERROR!!! Calling SetKMode`: its own CPU detection, caught by its handler, harmless. Latent, not
+  investigated: the System control panel never showed the CPU speed (`OALIoCtlProcessorInfo` fills
+  `dwClockSpeed`). Also seen:
   `VirtualProtectEx` `PAGE_WRITECOMBINE` fails, so the RawFrameBuffer mapping stays uncached.
 - **Future goal (user, 2026-11-23): VCHIQ.** The real video acceleration path: HVS YUV planes
   (hardware scaling and colour conversion through dispmanx) and hardware decode (MMAL/OpenMAX) are

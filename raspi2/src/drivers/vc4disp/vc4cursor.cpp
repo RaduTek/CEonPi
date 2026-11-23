@@ -34,6 +34,12 @@
 // also times the firmware calls (1 MHz system timer) and logs a summary
 // every VC4_CURSOR_LOG_CALLS calls.
 //
+// The OAL still busy-waited ~2.2 ms per call inside KernelIoControl, so the
+// cursor thread now uses its asynchronous mailbox IOCTL: it posts the
+// message from its own uncached buffer and polls for the reply with
+// Sleep(1) in between, leaving the CPU to other threads. Without that IOCTL
+// (an older OAL), or after a timeout, it falls back to the synchronous call.
+//
 // Registry value HwCursor=0 keeps the software cursor.
 //
 #define DDI 1
@@ -53,6 +59,14 @@
 #define CURSOR_MIN              16
 #define CURSOR_MAX              64
 #define CURSOR_BUF_BYTES        (CURSOR_MAX * CURSOR_MAX * 4)
+
+// The asynchronous property message lives after the image (16-byte aligned)
+#define CURSOR_MSG_BYTES        64
+#define CURSOR_ALLOC_BYTES      (CURSOR_BUF_BYTES + CURSOR_MSG_BYTES)
+
+// Longest wait for an asynchronous reply, in 1 ms polls
+#define VC4_CURSOR_ASYNC_POLLS  100
+#define PROPERTY_RESPONSE_OK    0x80000000
 
 #define BUS_UNCACHED_ALIAS      0xC0000000
 
@@ -108,13 +122,15 @@ BOOL Vc4GPE::HwCursorInit()
     if (m_pHwCursorBuf != NULL) return TRUE;
 
     m_pHwCursorBuf = (DWORD*)AllocPhysMem(
-        CURSOR_BUF_BYTES, PAGE_READWRITE | PAGE_NOCACHE, 0, 0, &pa
+        CURSOR_ALLOC_BYTES, PAGE_READWRITE | PAGE_NOCACHE, 0, 0, &pa
     );
     if (m_pHwCursorBuf == NULL) {
         RETAILMSG(1, (L"vc4disp: hardware cursor buffer allocation failed\r\n"));
         return FALSE;
     }
     m_dwHwCursorBus = BUS_UNCACHED_ALIAS | pa;
+    m_pHwCursorMsg = (DWORD*)((BYTE*)m_pHwCursorBuf + CURSOR_BUF_BYTES);
+    m_dwHwCursorMsgBus = m_dwHwCursorBus + CURSOR_BUF_BYTES;
 
     // System timer for the call statistics (optional)
     {
@@ -220,7 +236,7 @@ VOID Vc4GPE::CursorThread()
             LeaveCriticalSection(&m_csCursor);
 
             dwStart = (m_pSysTimer != NULL) ? m_pSysTimer[SYSTIMER_CLO_DWORD] : 0;
-            fOk = HwSetPointerState(fVisible, x, y);
+            fOk = HwSendPointerState(fVisible, x, y);
             dwUs = (m_pSysTimer != NULL) ? m_pSysTimer[SYSTIMER_CLO_DWORD] - dwStart : 0;
 
             if (!fOk) {
@@ -238,9 +254,10 @@ VOID Vc4GPE::CursorThread()
                 m_nCursorMoves = 0;
                 LeaveCriticalSection(&m_csCursor);
                 RETAILMSG(1, (L"vc4disp: cursor: %d firmware calls for %d moves, "
-                    L"call avg %d us, max %d us, interval %d ms\r\n",
+                    L"call avg %d us, max %d us, interval %d ms, %s\r\n",
                     m_nCursorCalls, nMoves, m_dwCursorUsTotal / m_nCursorCalls,
-                    m_dwCursorUsMax, m_dwCursorIntervalMs
+                    m_dwCursorUsMax, m_dwCursorIntervalMs,
+                    m_fMailboxAsync ? L"async" : L"sync"
                 ));
                 m_nCursorCalls = 0;
                 m_dwCursorUsTotal = 0;
@@ -351,4 +368,84 @@ BOOL Vc4GPE::HwSetPointerState(BOOL fVisible, int x, int y)
         return FALSE;
     }
     return TRUE;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  HwSendPointerState
+//
+//  Cursor thread: sends a cursor state through the OAL's asynchronous
+//  mailbox IOCTL and sleeps while the VideoCore works on it. Falls back to
+//  the synchronous HwSetPointerState when the asynchronous path is missing
+//  or misbehaves.
+//
+BOOL Vc4GPE::HwSendPointerState(BOOL fVisible, int x, int y)
+{
+    RASPI_MAILBOX_ASYNC req;
+    DWORD *pMsg = m_pHwCursorMsg;
+    DWORD dwDone = 0, i;
+
+    if (!m_fMailboxAsync || pMsg == NULL) {
+        return HwSetPointerState(fVisible, x, y);
+    }
+
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+
+    // Complete property message: size, request, one tag, end tag
+    pMsg[0] = 10 * sizeof(DWORD);
+    pMsg[1] = 0;
+    pMsg[2] = TAG_SET_CURSOR_STATE;
+    pMsg[3] = 4 * sizeof(DWORD);
+    pMsg[4] = 0;
+    pMsg[5] = fVisible ? 1 : 0;
+    pMsg[6] = x;
+    pMsg[7] = y;
+    pMsg[8] = 1;                        // framebuffer coordinates
+    pMsg[9] = 0;
+
+    // The buffer is uncached: make sure the writes have left the write buffer
+    CacheRangeFlush(NULL, 0, CACHE_SYNC_WRITEBACK);
+
+    req.dwCommand = RASPI_MAILBOX_ASYNC_SEND;
+    req.dwBusAddr = m_dwHwCursorMsgBus;
+    req.pvMessage = pMsg;
+    req.cbMessage = 10 * sizeof(DWORD);
+    if (!KernelIoControl(IOCTL_HAL_MY_MAILBOX_ASYNC, &req, sizeof(req), NULL, 0, NULL)) {
+        RETAILMSG(1, (L"vc4disp: asynchronous mailbox unavailable (error %d), "
+            L"cursor uses synchronous calls\r\n", GetLastError()
+        ));
+        m_fMailboxAsync = FALSE;
+        return HwSetPointerState(fVisible, x, y);
+    }
+
+    req.dwCommand = RASPI_MAILBOX_ASYNC_POLL;
+    for (i = 0; i < VC4_CURSOR_ASYNC_POLLS; i++) {
+        Sleep(1);
+        if (!KernelIoControl(IOCTL_HAL_MY_MAILBOX_ASYNC, &req, sizeof(req),
+                &dwDone, sizeof(dwDone), NULL)) {
+            break;
+        }
+        if (dwDone) {
+            if (pMsg[1] != PROPERTY_RESPONSE_OK ||
+                (pMsg[4] & PROPERTY_RESPONSE_OK) == 0 || pMsg[5] != 0
+            ) {
+                RETAILMSG(1, (L"vc4disp: Set cursor state rejected (resp 0x%08x "
+                    L"0x%08x value %d)\r\n", pMsg[1], pMsg[4], pMsg[5]
+                ));
+                return FALSE;
+            }
+            return TRUE;
+        }
+    }
+
+    // No reply: forget the message and stay synchronous from now on, so a
+    // late reply can never be taken for a new message's
+    req.dwCommand = RASPI_MAILBOX_ASYNC_ABANDON;
+    KernelIoControl(IOCTL_HAL_MY_MAILBOX_ASYNC, &req, sizeof(req), NULL, 0, NULL);
+    RETAILMSG(1, (L"vc4disp: asynchronous cursor message got no reply, "
+        L"cursor uses synchronous calls\r\n"
+    ));
+    m_fMailboxAsync = FALSE;
+    return HwSetPointerState(fVisible, x, y);
 }

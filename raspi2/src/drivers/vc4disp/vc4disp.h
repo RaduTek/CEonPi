@@ -184,6 +184,9 @@ private:
     DWORD  m_nCursorCalls;
     DWORD  m_dwCursorUsTotal;
     DWORD  m_dwCursorUsMax;
+    DWORD* m_pHwCursorMsg;          // asynchronous property message, uncached
+    DWORD  m_dwHwCursorMsgBus;
+    BOOL   m_fMailboxAsync;         // OAL asynchronous mailbox path usable
 
     // DMA blits (vc4dma.cpp): ready once DmaInit has set up the channel
     BOOL   m_fDmaEnabled;
@@ -227,6 +230,7 @@ private:
         int xSize, int ySize);
     BOOL HwSetPointerState(BOOL fVisible, int x, int y);
     VOID HwQueuePointerState(BOOL fVisible, int x, int y);
+    BOOL HwSendPointerState(BOOL fVisible, int x, int y);
     VOID HwCursorDeinit();
     VOID CursorThread();
     static DWORD WINAPI CursorThreadProc(LPVOID pContext);
