@@ -26,14 +26,12 @@ This README document is mostly handwritten, but architecture docs under `docs/` 
 
 ## Board support
 
-The original project was only tested on the original Raspberry Pi Model B, since that was the only board that existed at the time. Luckily, the Pi Zero uses the same SoC, and the original BSP has booted to a desktop just fine with no modifications.
-
-Most of the work was done on the Pi Zero W. The Ethernet driver was developed and tested on a Pi 1 Model B.
+Most of the work was done on the Pi 1 Model B. Images are also tested on the Pi Zero W, which works because it's based on the same BCM2835 SoC.
 
 | Board | Features |
 |-|-|
-| Pi Zero (W) | HDMI, USB host |
 | Pi 1 Model B | HDMI, USB host, Ethernet, 3.5mm Audio |
+| Pi Zero (W) | HDMI, USB host |
 
 ## Installation
 
