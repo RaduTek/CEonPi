@@ -29,6 +29,7 @@
     <BspItemId>Item:CEonPi:SdOffload:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:Audio:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:AudioTest:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:VolTray:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:Boling Consulting Inc.:BSPTemplateInstructions:BSPTemplate_raspi2">
     <Title>!BSP Template Instructions - Start Here!</Title>
@@ -116,6 +117,17 @@
     <SourceCode>
       <Title>AUDIO TEST SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\AUDIOTEST</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:VolTray:raspi2">
+    <Title>Volume tray icon (voltray.exe)</Title>
+    <Description>Speaker icon in the taskbar notification area: click it for a volume slider and a Mute check box (right click: Exit). Started from the Startup folder; no desktop shortcut. Needs the Waveform Audio catalog item (SYSGEN_AUDIO), an audio driver and a shell with a taskbar. Sets BSP_VOLTRAY=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_VOLTRAY</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>VOLUME TRAY ICON SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\VOLTRAY</Path>
     </SourceCode>
   </Item>
 </CatalogFile>

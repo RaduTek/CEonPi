@@ -30,3 +30,14 @@ IF BSP_AUDIOTEST
 Directory("\Windows\Desktop"):-File("Audio Test.lnk","\Windows\audiotest.lnk")
 ENDIF BSP_AUDIOTEST
 ENDIF BSP_NOAUDIO !
+
+; Volume tray icon: started by Explorer from the Startup folder (optional,
+; BSP_VOLTRAY=1). No desktop shortcut. The folder is the "StartUp" entry of
+; HKLM\System\Explorer\Shell Folders (\Windows\StartUp); nothing else in this
+; OS design creates it.
+IF BSP_NOAUDIO !
+IF BSP_VOLTRAY
+Directory("\Windows"):-Directory("StartUp")
+Directory("\Windows\StartUp"):-File("Volume.lnk","\Windows\voltray.lnk")
+ENDIF BSP_VOLTRAY
+ENDIF BSP_NOAUDIO !

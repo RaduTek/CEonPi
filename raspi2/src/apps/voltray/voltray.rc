@@ -1,0 +1,35 @@
+//
+// voltray.rc - resources for voltray.exe (src\apps\voltray)
+//
+// The application icon is the first icon resource, so the shell uses it for
+// the executable.
+//
+#include <windows.h>
+#include "resource.h"
+
+IDI_VOLTRAY     ICON    "voltray.ico"
+IDI_TRAY        ICON    "tray.ico"
+IDI_TRAY_MUTE   ICON    "tray_mute.ico"
+
+// Windows XP style volume popup: no caption, "Volume" label, vertical
+// slider with 6 ticks (0, 20, ..., 100 %), "Mute" check box below it.
+IDD_VOLUME DIALOG 0, 0, 52, 112
+STYLE WS_POPUP | WS_BORDER
+FONT 8, "Tahoma"
+BEGIN
+    CTEXT           "Volume", IDC_STATIC, 2, 5, 48, 9
+    CONTROL         "", IDC_SLIDER, "msctls_trackbar32",
+                    TBS_VERT | TBS_BOTH | TBS_AUTOTICKS | WS_TABSTOP,
+                    12, 16, 28, 74
+    AUTOCHECKBOX    "&Mute", IDC_MUTE, 9, 96, 38, 10, WS_TABSTOP
+END
+
+IDM_TRAY MENU
+BEGIN
+    POPUP "Volume"
+    BEGIN
+        MENUITEM "&Volume && Sounds Settings", IDM_SETTINGS
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_EXIT
+    END
+END

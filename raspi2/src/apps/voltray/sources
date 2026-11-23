@@ -1,0 +1,26 @@
+# Volume tray icon (src\apps\voltray, voltray.exe).
+#
+# Speaker icon in the taskbar notification area; a click opens a small
+# volume slider with a Mute check box. Included in the image with
+# BSP_VOLTRAY=1 (catalog item "Volume tray icon (voltray.exe)"), started from
+# \Windows\Startup.
+#
+# The waveOut exports exist in coredll.lib only when the OS design has
+# Waveform Audio (SYSGEN_AUDIO), so skip the build without it.
+
+!IF "$(SYSGEN_AUDIO)" != "1"
+SKIPBUILD=1
+!ENDIF
+
+TARGETNAME=voltray
+TARGETTYPE=PROGRAM
+EXEENTRY=WinMainCRTStartup
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\corelibc.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\commctrl.lib \
+
+SOURCES= \
+    voltray.cpp \
+    voltray.rc
