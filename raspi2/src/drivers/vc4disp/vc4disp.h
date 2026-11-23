@@ -39,6 +39,9 @@
 // DWORD: 1 (default) use vc4disp's own blits (vc4blt.cpp), 0 do not
 #define VC4DISP_REG_DRIVERBLT       L"DriverBlt"
 
+// DWORD: 1 (default) use the VideoCore hardware cursor, 0 software cursor
+#define VC4DISP_REG_HWCURSOR        L"HwCursor"
+
 // CE ARM static mappings: uncached view = cached view + 0x20000000
 #define VC4DISP_STATIC_CACHED       0x80000000
 #define VC4DISP_STATIC_UNCACHED     0xA0000000
@@ -51,7 +54,7 @@ class Vc4GPE : public GPE
 {
 
 public:
-    Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt);
+    Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt, BOOL fHwCursor);
     virtual ~Vc4GPE();
 
     virtual int InVBlank();
@@ -94,6 +97,14 @@ private:
     UCHAR* m_cursorXor;
     UCHAR* m_cursorAnd;
 
+    // Hardware cursor (vc4cursor.cpp): enabled by the registry, active while
+    // the firmware shows the current shape (the software cursor is then off)
+    BOOL   m_fHwCursorEnabled;
+    BOOL   m_fHwCursorActive;
+    BOOL   m_fHwCursorLogged;
+    DWORD* m_pHwCursorBuf;
+    DWORD  m_dwHwCursorBus;
+
     // Helper functions
     UINT8* QueryModeInfo(int modeNumber);
     VOID FlushRect(const RECTL *pRect);
@@ -103,6 +114,13 @@ private:
     SCODE BltCopy32To565(GPEBltParms *pParms);
     SCODE BltCopy24To565(GPEBltParms *pParms);
     SCODE BltInvert16(GPEBltParms *pParms);
+
+    // vc4cursor.cpp
+    BOOL MailboxTags(DWORD *pTags, DWORD cbTags);
+    BOOL HwCursorInit();
+    BOOL HwSetPointerShape(GPESurf *pMask, int xHotspot, int yHotspot,
+        int xSize, int ySize);
+    BOOL HwSetPointerState(BOOL fVisible, int x, int y);
     VOID CursorOn();
     VOID CursorOff();
     SCODE WrappedEmulatedLine(GPELineParms*);

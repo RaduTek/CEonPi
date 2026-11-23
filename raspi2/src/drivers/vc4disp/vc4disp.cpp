@@ -107,7 +107,7 @@ static DWORD ReadRegDword(HKEY hKey, LPCWSTR pszName, DWORD dwDefault)
 BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
 {
     HKEY hKey = NULL;
-    DWORD dwCachedFb, dwFastBlt, dwDriverBlt;
+    DWORD dwCachedFb, dwFastBlt, dwDriverBlt, dwHwCursor;
 
     DEBUGMSG(GPE_ZONE_PDD, (
         L"+DisplayInit(%s, %d)\r\n", pszInstance, monitors
@@ -126,17 +126,19 @@ BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
     dwCachedFb = ReadRegDword(hKey, VC4DISP_REG_CACHEDFB, 1);
     dwFastBlt = ReadRegDword(hKey, VC4DISP_REG_FASTBLT, 1);
     dwDriverBlt = ReadRegDword(hKey, VC4DISP_REG_DRIVERBLT, 1);
+    dwHwCursor = ReadRegDword(hKey, VC4DISP_REG_HWCURSOR, 1);
     if (hKey != NULL) RegCloseKey(hKey);
 
     // Must be set before the first blit
     g_fUseFastBlt = (dwFastBlt != 0);
 
     // The GPE constructor runs GenBltInitialize
-    g_pGPE = new Vc4GPE(dwCachedFb != 0, dwDriverBlt != 0);
+    g_pGPE = new Vc4GPE(dwCachedFb != 0, dwDriverBlt != 0, dwHwCursor != 0);
 
-    RETAILMSG(1, (L"vc4disp: FastBlt %s, DriverBlt %s, GenBlt code generator %s\r\n",
+    RETAILMSG(1, (L"vc4disp: FastBlt %s, DriverBlt %s, HwCursor %s, GenBlt code generator %s\r\n",
         g_fUseFastBlt ? L"on" : L"off",
         (dwDriverBlt != 0) ? L"on" : L"off",
+        (dwHwCursor != 0) ? L"on" : L"off",
         (g_CpuFuncs.pfnPCodeToCpuCode != NULL) ? L"on" : L"off"
     ));
 
@@ -184,7 +186,7 @@ GPE* GetGPE()
 //
 //  Constructor
 //
-Vc4GPE::Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt)
+Vc4GPE::Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt, BOOL fHwCursor)
 {
     m_pPrimarySurface = NULL;
     memset(&m_gpeMode, 0, sizeof(m_gpeMode));
@@ -199,6 +201,11 @@ Vc4GPE::Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt)
     m_cursorStore = NULL;
     m_cursorXor = NULL;
     m_cursorAnd = NULL;
+    m_fHwCursorEnabled = fHwCursor;
+    m_fHwCursorActive = FALSE;
+    m_fHwCursorLogged = FALSE;
+    m_pHwCursorBuf = NULL;
+    m_dwHwCursorBus = 0;
 }
 
 //------------------------------------------------------------------------------
@@ -211,6 +218,10 @@ Vc4GPE::~Vc4GPE()
     delete [] m_cursorStore; m_cursorStore = NULL;
     delete [] m_cursorXor; m_cursorXor = NULL;
     delete [] m_cursorAnd; m_cursorAnd = NULL;
+    if (m_pHwCursorBuf != NULL) {
+        FreePhysMem(m_pHwCursorBuf);
+        m_pHwCursorBuf = NULL;
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -883,7 +894,26 @@ SCODE Vc4GPE::SetPointerShape(
 
     if (pMask == NULL) {
         m_cursorDisabled = TRUE;
+        if (m_fHwCursorActive) HwSetPointerState(FALSE, 0, 0);
         goto cleanUp;
+    }
+
+    // Hardware cursor: the firmware overlays the shape, the software cursor
+    // stays disabled. Falls back to the software cursor if it fails.
+    if (m_fHwCursorEnabled && m_pMode != NULL &&
+        HwSetPointerShape(pMask, xHotspot, yHotspot, xSize, ySize)
+    ) {
+        m_fHwCursorActive = TRUE;
+        m_cursorDisabled = TRUE;
+        m_cursorSize.x = xSize;
+        m_cursorSize.y = ySize;
+        m_cursorHotspot.x = xHotspot;
+        m_cursorHotspot.y = yHotspot;
+        goto cleanUp;
+    }
+    if (m_fHwCursorActive) {
+        HwSetPointerState(FALSE, 0, 0);
+        m_fHwCursorActive = FALSE;
     }
 
     m_cursorDisabled = FALSE;
@@ -951,6 +981,16 @@ cleanUp:
 //
 SCODE Vc4GPE::MovePointer(int x, int y)
 {
+    if (m_fHwCursorActive) {
+        if (!HwSetPointerState(x != -1 || y != -1, x, y)) {
+            // Give up on the hardware cursor; the software one takes over
+            // with the next shape GWES sets
+            m_fHwCursorActive = FALSE;
+            m_fHwCursorEnabled = FALSE;
+        }
+        return S_OK;
+    }
+
     CursorOff();
 
     if (x != -1 || y != -1) {

@@ -44,11 +44,14 @@ IF BSP_VC4DISP
 ; gpe.lib); 0 = leave them off.
 ; DriverBlt: 1 = vc4disp's own routines for 24/32 bpp -> RGB565 copies and
 ; DSTINVERT (vc4blt.cpp); 0 = leave those to gpe.lib's slow generic path.
+; HwCursor: 1 = VideoCore hardware cursor overlay (vc4cursor.cpp; falls back
+; to the software cursor if the firmware rejects it); 0 = software cursor.
 [HKEY_LOCAL_MACHINE\Drivers\Display\vc4disp\Config]
     "DisplayDll"="vc4disp.dll"
     "CachedFrameBuffer"=dword:1
     "FastBlt"=dword:1
     "DriverBlt"=dword:1
+    "HwCursor"=dword:1
 
 [HKEY_LOCAL_MACHINE\System\GDI\Drivers]
     "Display"="vc4disp.dll"

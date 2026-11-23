@@ -108,6 +108,18 @@ extern "C" {
 // OALIoCtlHalGetMacAddress in ioctl.c.
 #define IOCTL_HAL_MY_GET_MAC_ADDRESS         CTL_CODE(FILE_DEVICE_HAL, 2048+13, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
+// Sends a list of VideoCore property tags in one mailbox message (the display
+// driver uses it for the frame buffer and the hardware cursor). Input: the
+// tags back to back, each [tag id][value buffer size in bytes][0][values...],
+// without the message header or end tag. Output (may be the same buffer, at
+// least as large): the same tags as the VideoCore answered them. Only frame
+// buffer (0x0004xxxx) and cursor (0x00008010, 0x00008011) tags are accepted,
+// at most RASPI_MAILBOX_MAX_TAG_BYTES. The IOCTL fails if the message as a
+// whole is rejected; the caller checks each tag's response bit (0x80000000 in
+// the third word) and values. Handler: OALIoCtlHalMailboxProperty in ioctl.c.
+#define IOCTL_HAL_MY_MAILBOX_PROPERTY        CTL_CODE(FILE_DEVICE_HAL, 2048+14, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define RASPI_MAILBOX_MAX_TAG_BYTES          1024
+
 // Structure used by the interrupt code to manage the serial FIFO buffers
 typedef struct {
 	PBYTE pRecvBuff;

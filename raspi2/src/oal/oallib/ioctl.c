@@ -57,6 +57,10 @@ BOOL OALIoCtlHalReboot(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 							  VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
+// Sends a list of frame buffer / cursor property tags (for the display driver).
+BOOL OALIoCtlHalMailboxProperty(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+								VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
 // Tells filesys never to delete the registry hives at boot (defined below).
 BOOL OALIoCtlHalGetHiveCleanFlag(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 								 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
@@ -114,6 +118,7 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 { IOCTL_HAL_MY_GET_HARDWARE_POINTERS,         0,  OALIoCtlHalGetHardwarePtrs     },
 { IOCTL_HAL_MY_GET_EMMC_CLOCK,                0,  OALIoCtlHalGetEmmcClock        },
 { IOCTL_HAL_MY_GET_MAC_ADDRESS,               0,  OALIoCtlHalGetMacAddress       },
+{ IOCTL_HAL_MY_MAILBOX_PROPERTY,              0,  OALIoCtlHalMailboxProperty     },
 { IOCTL_HAL_DDI,                              0,  OALIoctlHalDdi   },
 
 // Required Termination
@@ -600,6 +605,106 @@ BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords)
 
 	for (i = 0; i < nWords; i++)
 		pdwValues[i] = pBuff[5 + i];
+
+	return TRUE;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  OALIoCtlHalMailboxProperty
+//
+//  Implements IOCTL_HAL_MY_MAILBOX_PROPERTY (see image_cfg.h): sends the
+//  caller's tag list as one property message through the shared mailbox
+//  buffer, with the same cache handling as OALMailboxPropertyTag, and copies
+//  the answered tags back. Runs under the OAL IOCTL critical section, so it
+//  does not race the other users of the shared buffer.
+//
+//  Every tag must be a frame buffer tag (0x0004xxxx: get, test and set) or
+//  one of the two cursor tags; the list must end exactly after its last tag.
+//
+#define RASPI_PROPTAG_SET_CURSOR_INFO   0x00008010
+#define RASPI_PROPTAG_SET_CURSOR_STATE  0x00008011
+
+static BOOL IsAllowedDisplayTag(DWORD dwTag)
+{
+	return ((dwTag & 0xFFFF0000) == 0x00040000) ||
+		   (dwTag == RASPI_PROPTAG_SET_CURSOR_INFO) ||
+		   (dwTag == RASPI_PROPTAG_SET_CURSOR_STATE);
+}
+
+BOOL OALIoCtlHalMailboxProperty(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+								VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	const DWORD *pTags = (const DWORD *)pInpBuffer;
+	volatile DWORD *pBuff = 0;
+	DWORD dwBuffSize = 0;
+	DWORD dwResp = 0;
+	DWORD nWords, nValueWords, iWord, i, cbTotal;
+	int rc;
+
+	UNREFERENCED_PARAMETER(code);
+
+	if (pOutSize != 0)
+		*pOutSize = 0;
+
+	if ((pInpBuffer == 0) || (pOutBuffer == 0) || (inpSize < 3 * sizeof(DWORD)) ||
+		(inpSize > RASPI_MAILBOX_MAX_TAG_BYTES) || ((inpSize & 3) != 0) ||
+		(outSize < inpSize))
+	{
+		NKSetLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	// Walk the tags: allowed ids, whole value buffers, nothing left over
+	nWords = inpSize / sizeof(DWORD);
+	iWord = 0;
+	while (iWord < nWords)
+	{
+		if ((iWord + 3 > nWords) || !IsAllowedDisplayTag(pTags[iWord]) ||
+			((pTags[iWord + 1] & 3) != 0))
+		{
+			NKSetLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+		nValueWords = pTags[iWord + 1] / sizeof(DWORD);
+		if (nValueWords > nWords - iWord - 3)
+		{
+			NKSetLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+		iWord += 3 + nValueWords;
+	}
+
+	// Message header (2 words) + tags + end tag
+	cbTotal = 2 * sizeof(DWORD) + inpSize + sizeof(DWORD);
+	if (MailboxGetMailboxBuffer(TRUE, (DWORD *)&pBuff, &dwBuffSize) != 0)
+		return FALSE;
+	if ((pBuff == 0) || (dwBuffSize < cbTotal))
+		return FALSE;
+
+	pBuff[0] = cbTotal;
+	pBuff[1] = 0x00000000;
+	for (i = 0; i < nWords; i++)
+		pBuff[2 + i] = pTags[i];
+	pBuff[2 + nWords] = 0x00000000;
+
+	OEMCacheRangeFlush((VOID *)pBuff, cbTotal, CACHE_SYNC_WRITEBACK);
+
+	rc = MailboxSendMail(0, MAILBOX_CHAN_PROPARM2VC, ((DWORD)pBuff) >> 4);
+	if (rc == 0)
+		rc = MailboxGetMail(0, MAILBOX_CHAN_PROPARM2VC, &dwResp);
+	if (rc != 0)
+		return FALSE;
+
+	OEMCacheRangeFlush((VOID *)pBuff, cbTotal, CACHE_SYNC_DISCARD);
+
+	if (pBuff[1] != RASPI_PROPERTY_RESPONSE_OK)
+		return FALSE;
+
+	for (i = 0; i < nWords; i++)
+		((DWORD *)pOutBuffer)[i] = pBuff[2 + i];
+	if (pOutSize != 0)
+		*pOutSize = inpSize;
 
 	return TRUE;
 }

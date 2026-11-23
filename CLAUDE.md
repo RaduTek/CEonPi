@@ -350,6 +350,23 @@ ARM1176.
   1882 -> 13290, Invert 2145 -> 26607. gdibench's three source tiles (565/24/32 bpp) match, UI and
   IE7 render correctly, IE7 paints pages much faster. Remaining: some lag between mouse-wheel scroll and
   the screen update in IE7 (not investigated).
+- **D3 hardware cursor verified (2026-11-23, Pi 1 Model B):** OAL `IOCTL_HAL_MY_MAILBOX_PROPERTY`
+  (`ioctl.c` `OALIoCtlHalMailboxProperty`, code in `image_cfg.h`) sends a caller-built list of property
+  tags (only `0x0004xxxx` frame buffer and `0x00008010/11` cursor tags, max 1 KB) through the shared
+  mailbox buffer. `vc4cursor.cpp` converts CE's AND/XOR masks to 32 bpp ARGB in an uncached
+  `AllocPhysMem` buffer and passes its **bus address `0xC0000000 | pa` (works)** to Set cursor info
+  (`0x00008010`: w, h, unused, ptr, hotX, hotY; response 0 = valid), then Set cursor state (`0x00008011`:
+  enable, x, y, flags=1 framebuffer coords) on every `MovePointer`. 32x32 shapes accepted; arrow, I-beam
+  and wait cursors look right; arrow tip and I-beam hotspot both match where clicks land, so (x, y) in
+  Set cursor state is the hotspot position. AND=1/XOR=1 (invert) pixels are
+  drawn black. Registry `HwCursor` (default 1); any rejected call logs and falls back to the software
+  cursor. Log: `vc4disp: hardware cursor on (32x32, hotspot 0,0, image at bus 0xc1854000)`.
+- **D2 dropped (user decision, 2026-11-23):** the firmware already picks the native resolution per
+  display and `config.txt` can override it, which beats registry settings plus an image rebuild.
+  Depth stays **16 bpp RGB565**, fixed at compile time by `VID_BITSPP` (`image_cfg.h`) and requested by
+  the OAL's `InitVideoSystem`, so `config.txt` `framebuffer_depth` has no effect. 24 bpp would need the
+  OAL's 24 bpp masks in `GetVideoSettings` fixed (they are 32-bit positions) and has no fast blit paths;
+  the boot console does not support 32 bpp.
 - Plan: D0 copy + clean-up (no behaviour change);
   D1 speed up drawing (GDI reads from uncached memory: cached shadow surface or write-combined
   mapping); D2 driver-owned mode set through a generic mailbox property-tag IOCTL (16/32 bpp, blanking
