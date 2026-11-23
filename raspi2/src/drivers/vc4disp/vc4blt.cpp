@@ -94,6 +94,9 @@ static __inline BOOL IsOrdered(const RECTL *pRect)
 //
 VOID Vc4GPE::SelectDriverBlt(GPEBltParms *pParms)
 {
+    // Large screen-to-screen copies and screen fills go to the DMA engine
+    if (DmaSelect(pParms)) return;
+
     if (!m_fDriverBlt) return;
 
     // Common conditions: plain (no stretch, transparency, alpha or mask)

@@ -183,6 +183,13 @@ BOOL OEMInterruptEnable(DWORD dwSysIntr, LPVOID pvData, DWORD cbData)
 		}
 		break;
 
+	case SYSINTR_DISPDMA:
+		{
+			// Display driver DMA channel (DISP_DMA_CHANNEL), first IRQ register.
+			*pIrqEnabIrq1Reg = RASPI_IRQR1_DISPDMA;
+		}
+		break;
+
 	case SYSINTR_RESCHED:
 		{
 			*pIrqEnabIrq1Reg = RASPI_IRQR1_TIMER3;
@@ -233,6 +240,12 @@ void OEMInterruptDisable(DWORD dwSysIntr)
 	case SYSINTR_AUDIO:
 		{
 			*pIrqDisabIrq1Reg = RASPI_IRQR1_AUDIODMA;
+		}
+		break;
+
+	case SYSINTR_DISPDMA:
+		{
+			*pIrqDisabIrq1Reg = RASPI_IRQR1_DISPDMA;
 		}
 		break;
 
@@ -295,6 +308,12 @@ void OEMInterruptDone(DWORD dwSysIntr)
 	case SYSINTR_AUDIO:
 		{
 			*pIrqEnabIrq1Reg = RASPI_IRQR1_AUDIODMA;
+		}
+		break;
+
+	case SYSINTR_DISPDMA:
+		{
+			*pIrqEnabIrq1Reg = RASPI_IRQR1_DISPDMA;
 		}
 		break;
 
@@ -522,6 +541,15 @@ VidCON_WriteDebugByteExtern('~');
 		{
 			*pIrqDisabIrq1Reg = RASPI_IRQR1_AUDIODMA;
 			SysIntr = SYSINTR_AUDIO;
+		}
+		// ------------------------------------
+		// Display driver DMA channel. Same scheme: masked until the driver
+		// has cleared the channel's INT flag and called InterruptDone.
+		// ------------------------------------
+		else if (dwIrq1Pend & RASPI_IRQR1_DISPDMA)
+		{
+			*pIrqDisabIrq1Reg = RASPI_IRQR1_DISPDMA;
+			SysIntr = SYSINTR_DISPDMA;
 		}
 		else
 		{

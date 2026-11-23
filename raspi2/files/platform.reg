@@ -52,6 +52,20 @@ IF BSP_VC4DISP
     "FastBlt"=dword:1
     "DriverBlt"=dword:1
     "HwCursor"=dword:1
+; DmaBlt: 1 = large screen-to-screen copies and screen fills by DMA channel
+; DISP_DMA_CHANNEL (vc4dma.cpp; turns itself off and logs on any DMA error);
+; 0 = CPU only. DmaMinPixels: smallest rectangle that uses DMA (0x7FFFFFFF =
+; set DMA up but never use it). DmaBurst: DMA burst length (0..15); KEEP 0:
+; burst 8 lost the HDMI signal or hung the system, burst 2 hung the system
+; once the audio DMA was running too.
+; DmaBusOffset: physical -> VideoCore bus address (0xC0000000 + burst 8 hung).
+    "DmaBlt"=dword:1
+    "DmaMinPixels"=dword:4000
+    "DmaBurst"=dword:0
+    "DmaBusOffset"=dword:40000000
+; DmaCopy: 1 = screen-to-screen copies by DMA too; 0 = fills only (with
+; DmaBurst 0, DMA copies measured slower than the CPU: 52 vs 81 Mpix/s).
+    "DmaCopy"=dword:0
 
 [HKEY_LOCAL_MACHINE\System\GDI\Drivers]
     "Display"="vc4disp.dll"

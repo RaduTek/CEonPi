@@ -113,7 +113,8 @@ extern "C" {
 // tags back to back, each [tag id][value buffer size in bytes][0][values...],
 // without the message header or end tag. Output (may be the same buffer, at
 // least as large): the same tags as the VideoCore answered them. Only frame
-// buffer (0x0004xxxx) and cursor (0x00008010, 0x00008011) tags are accepted,
+// buffer (0x0004xxxx), cursor (0x00008010, 0x00008011) and "get DMA channels"
+// (0x00060001) tags are accepted,
 // at most RASPI_MAILBOX_MAX_TAG_BYTES. The IOCTL fails if the message as a
 // whole is rejected; the caller checks each tag's response bit (0x80000000 in
 // the third word) and values. Handler: OALIoCtlHalMailboxProperty in ioctl.c.

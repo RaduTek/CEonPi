@@ -23,7 +23,8 @@ WINCEOEM=1
 SOURCES=\
     vc4disp.cpp \
     vc4blt.cpp \
-    vc4cursor.cpp
+    vc4cursor.cpp \
+    vc4dma.cpp
 
 TARGETLIBS= \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \

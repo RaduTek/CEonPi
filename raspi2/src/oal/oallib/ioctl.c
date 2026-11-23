@@ -622,17 +622,20 @@ BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords)
 //  the answered tags back. Runs under the OAL IOCTL critical section, so it
 //  does not race the other users of the shared buffer.
 //
-//  Every tag must be a frame buffer tag (0x0004xxxx: get, test and set) or
-//  one of the two cursor tags; the list must end exactly after its last tag.
+//  Every tag must be a frame buffer tag (0x0004xxxx: get, test and set), one
+//  of the two cursor tags or "get DMA channels"; the list must end exactly
+//  after its last tag.
 //
 #define RASPI_PROPTAG_SET_CURSOR_INFO   0x00008010
 #define RASPI_PROPTAG_SET_CURSOR_STATE  0x00008011
+#define RASPI_PROPTAG_GET_DMA_CHANNELS  0x00060001
 
 static BOOL IsAllowedDisplayTag(DWORD dwTag)
 {
 	return ((dwTag & 0xFFFF0000) == 0x00040000) ||
 		   (dwTag == RASPI_PROPTAG_SET_CURSOR_INFO) ||
-		   (dwTag == RASPI_PROPTAG_SET_CURSOR_STATE);
+		   (dwTag == RASPI_PROPTAG_SET_CURSOR_STATE) ||
+		   (dwTag == RASPI_PROPTAG_GET_DMA_CHANNELS);
 }
 
 BOOL OALIoCtlHalMailboxProperty(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,

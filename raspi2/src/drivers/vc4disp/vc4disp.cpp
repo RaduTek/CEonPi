@@ -107,7 +107,8 @@ static DWORD ReadRegDword(HKEY hKey, LPCWSTR pszName, DWORD dwDefault)
 BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
 {
     HKEY hKey = NULL;
-    DWORD dwCachedFb, dwFastBlt, dwDriverBlt, dwHwCursor;
+    VC4DISP_SETTINGS settings;
+    DWORD dwFastBlt;
 
     DEBUGMSG(GPE_ZONE_PDD, (
         L"+DisplayInit(%s, %d)\r\n", pszInstance, monitors
@@ -123,22 +124,30 @@ BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
     ) {
         hKey = NULL;
     }
-    dwCachedFb = ReadRegDword(hKey, VC4DISP_REG_CACHEDFB, 1);
+    settings.fCachedFb = ReadRegDword(hKey, VC4DISP_REG_CACHEDFB, 1) != 0;
     dwFastBlt = ReadRegDword(hKey, VC4DISP_REG_FASTBLT, 1);
-    dwDriverBlt = ReadRegDword(hKey, VC4DISP_REG_DRIVERBLT, 1);
-    dwHwCursor = ReadRegDword(hKey, VC4DISP_REG_HWCURSOR, 1);
+    settings.fDriverBlt = ReadRegDword(hKey, VC4DISP_REG_DRIVERBLT, 1) != 0;
+    settings.fHwCursor = ReadRegDword(hKey, VC4DISP_REG_HWCURSOR, 1) != 0;
+    // DMA fills with single transfers: verified; copies and bursts are not
+    settings.fDmaBlt = ReadRegDword(hKey, VC4DISP_REG_DMABLT, 1) != 0;
+    settings.fDmaCopy = ReadRegDword(hKey, VC4DISP_REG_DMACOPY, 0) != 0;
+    settings.dwDmaMinPixels = ReadRegDword(hKey, VC4DISP_REG_DMAMINPIXELS, 16384);
+    // Burst 8 lost the HDMI signal (bus offset 0x40000000) or hung the
+    // system (0xC0000000) on a Pi 1 B; single transfers (0) work
+    settings.dwDmaBurst = ReadRegDword(hKey, VC4DISP_REG_DMABURST, 0) & 0xF;
+    settings.dwDmaBusOffset = ReadRegDword(hKey, VC4DISP_REG_DMABUSOFFSET, 0x40000000);
     if (hKey != NULL) RegCloseKey(hKey);
 
     // Must be set before the first blit
     g_fUseFastBlt = (dwFastBlt != 0);
 
     // The GPE constructor runs GenBltInitialize
-    g_pGPE = new Vc4GPE(dwCachedFb != 0, dwDriverBlt != 0, dwHwCursor != 0);
+    g_pGPE = new Vc4GPE(&settings);
 
     RETAILMSG(1, (L"vc4disp: FastBlt %s, DriverBlt %s, HwCursor %s, GenBlt code generator %s\r\n",
         g_fUseFastBlt ? L"on" : L"off",
-        (dwDriverBlt != 0) ? L"on" : L"off",
-        (dwHwCursor != 0) ? L"on" : L"off",
+        settings.fDriverBlt ? L"on" : L"off",
+        settings.fHwCursor ? L"on" : L"off",
         (g_CpuFuncs.pfnPCodeToCpuCode != NULL) ? L"on" : L"off"
     ));
 
@@ -186,12 +195,12 @@ GPE* GetGPE()
 //
 //  Constructor
 //
-Vc4GPE::Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt, BOOL fHwCursor)
+Vc4GPE::Vc4GPE(const VC4DISP_SETTINGS *pSettings)
 {
     m_pPrimarySurface = NULL;
     memset(&m_gpeMode, 0, sizeof(m_gpeMode));
-    m_fCachedFb = fCachedFb;
-    m_fDriverBlt = fDriverBlt;
+    m_fCachedFb = pSettings->fCachedFb;
+    m_fDriverBlt = pSettings->fDriverBlt;
     m_cursorVisible = FALSE;
     m_cursorDisabled = TRUE;
     m_cursorForcedOff = FALSE;
@@ -201,11 +210,28 @@ Vc4GPE::Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt, BOOL fHwCursor)
     m_cursorStore = NULL;
     m_cursorXor = NULL;
     m_cursorAnd = NULL;
-    m_fHwCursorEnabled = fHwCursor;
+    m_fHwCursorEnabled = pSettings->fHwCursor;
     m_fHwCursorActive = FALSE;
     m_fHwCursorLogged = FALSE;
     m_pHwCursorBuf = NULL;
     m_dwHwCursorBus = 0;
+    m_fDmaEnabled = pSettings->fDmaBlt;
+    m_fDmaReady = FALSE;
+    m_fDmaCopy = pSettings->fDmaCopy;
+    m_dwDmaMinPixels = pSettings->dwDmaMinPixels;
+    m_dwDmaBurst = pSettings->dwDmaBurst;
+    m_dwDmaBusOffset = pSettings->dwDmaBusOffset;
+    m_pDmaRegs = NULL;
+    m_pDmaChan = NULL;
+    m_pDmaCb = NULL;
+    m_dwDmaCbBus = 0;
+    m_nDmaCbMax = 0;
+    m_pDmaFill = NULL;
+    m_dwDmaFillBus = 0;
+    m_dwFbBus = 0;
+    m_hDmaEvent = NULL;
+    m_fDmaIntr = FALSE;
+    m_nDmaLogged = 0;
 }
 
 //------------------------------------------------------------------------------
@@ -214,6 +240,7 @@ Vc4GPE::Vc4GPE(BOOL fCachedFb, BOOL fDriverBlt, BOOL fHwCursor)
 //
 Vc4GPE::~Vc4GPE()
 {
+    DmaDeinit();
     delete m_pPrimarySurface; m_pPrimarySurface = NULL;
     delete [] m_cursorStore; m_cursorStore = NULL;
     delete [] m_cursorXor; m_cursorXor = NULL;
@@ -430,6 +457,9 @@ SCODE Vc4GPE::SetMode(int modeNumber, HPALETTE *pPalette)
         modeNumber, m_gpeMode.width, m_gpeMode.height, m_gpeMode.Bpp,
         pInfo->frameStride, ulFrame, m_fCachedFb ? L"cached" : L"uncached"
     ));
+
+    // DMA blits need the framebuffer address, so they start here
+    if (m_fDmaEnabled && !m_fDmaReady) DmaInit();
 
 cleanUp:
     delete [] pBuffer;

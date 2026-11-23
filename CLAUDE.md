@@ -361,6 +361,25 @@ ARM1176.
   Set cursor state is the hotspot position. AND=1/XOR=1 (invert) pixels are
   drawn black. Registry `HwCursor` (default 1); any rejected call logs and falls back to the software
   cursor. Log: `vc4disp: hardware cursor on (32x32, hotspot 0,0, image at bus 0xc1854000)`.
+- **D4 DMA blits (in progress, 2026-11-23):** `vc4dma.cpp`, DMA channel 5 (`DISP_DMA_CHANNEL`,
+  `SYSINTR_DISPDMA` = GPU IRQ 21 in the OAL), one control block per row, fills and screen-to-screen
+  copies >= `DmaMinPixels`. Firmware "get DMA channels" (tag `0x00060001`) returns **`0x7ff5`** on the
+  Pi 1 B (Linux's DT mask is `0x7f35`). **Burst length is critical (verified):** 128-bit transfers with
+  `DmaBurst`=8 lost the HDMI signal as soon as the desktop was filled (bus offset `0x40000000`; no DMA
+  error, firmware still answered mailbox calls) or hung the whole system on the first fill
+  (`0xC0000000`, heartbeat LED stopped). `DmaBurst`=0 with `0x40000000` works: fills land in the right
+  place, `solidColor` is already RGB565 (desktop `0x3b74`, taskbar `0xef5b`). Code defaults: `DmaBlt` 0,
+  `DmaBurst` 0. Measured with burst 0 (gdibench kpix/s, CPU -> DMA): **Fill 45393 -> 68157 (1.5x)**,
+  **Scroll 81138 -> 52432 (slower)**; a copy has to read every beat and single transfers cannot hide
+  the read latency. So copies stay on the CPU unless registry `DmaCopy`=1 (default 0); worth retrying
+  with `DmaBurst` 2 or 4 (8 broke the bus). Verified with `DmaCopy`=0: Fill 68517 (DMA), Scroll 80151
+  (CPU). **`DmaBurst`=2 did not hang**, but fills came out as vertical stripes (8 px colour, 8 px black):
+  within a burst the engine reads consecutive source addresses even with `SRC_INC` off, so the fill
+  pattern is now 256 bytes (16 beats x 16 bytes) of the colour. With that fixed, **`DmaBurst`=2 hung the
+  whole system** on the 6th fill, right after `PWMAUD: open` (audio DMA channel 4 starting). Bursts are
+  unsafe on this silicon in our setup (cause unproven: misaligned wide bursts, or two channels
+  contending); burst 0 with audio running is fine. **Decision: D4 = DMA fills only, burst 0**
+  (code defaults `DmaBlt` 1, `DmaCopy` 0, `DmaBurst` 0).
 - **D2 dropped (user decision, 2026-11-23):** the firmware already picks the native resolution per
   display and `config.txt` can override it, which beats registry settings plus an image rebuild.
   Depth stays **16 bpp RGB565**, fixed at compile time by `VID_BITSPP` (`image_cfg.h`) and requested by
