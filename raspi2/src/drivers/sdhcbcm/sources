@@ -4,8 +4,8 @@
 # SD card/bus helper libs. Building this REQUIRES the SD stack in the OS design
 # (SD Bus Driver + SD Memory + Standard SDHC Host Controller catalog items), so
 # that SDHCBase.lib / sdcardlib.lib / sdhclib.lib / sdbus.lib exist in the
-# public lib tree. Set BSP_NOSD=1 (and drop sdhcbcm from ..\dirs) to build
-# without the SD stack.
+# public lib tree. The image only gets the driver with BSP_SDHOST=1; to build
+# without the SD stack, drop sdhcbcm from ..\dirs.
 
 TARGETNAME=sdhcbcm
 TARGETTYPE=DYNLINK

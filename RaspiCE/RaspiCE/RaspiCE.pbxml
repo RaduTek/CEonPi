@@ -7,8 +7,6 @@
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_standardshell" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_shell" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_toolhelp" />
-    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_usb" />
-    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_usb_hid_clients" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_usb_storage" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_fatfs" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_mspart" />
@@ -19,9 +17,6 @@
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_commctrl" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_connmc" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_menu_tap_ui" />
-    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sdhc_standard" />
-    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sdbus" />
-    <Feature Name="Item" CatalogItemId="Item:MS:sysgen_sd_memory" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_netutils" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_aygshell" />
     <Feature Name="Item" CatalogItemId="Item:MS:sysgen_ethernet" />
@@ -41,6 +36,9 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdOffload:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Audio:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:VolTray:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:UsbHost:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:Ethernet:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:SdHost:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
@@ -60,6 +58,9 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdOffload:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Audio:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:VolTray:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:UsbHost:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:Ethernet:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:SdHost:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">
@@ -81,6 +82,9 @@
         <Feature Name="Item" CatalogItemId="Item:CEonPi:SdOffload:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:Audio:raspi2" />
         <Feature Name="Item" CatalogItemId="Item:CEonPi:VolTray:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:UsbHost:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:Ethernet:raspi2" />
+        <Feature Name="Item" CatalogItemId="Item:CEonPi:SdHost:raspi2" />
       </FeatureCollection>
       <FeatureCollection Name="FeaturesExcludedFromImage" EnforceUniqueItems="True" />
       <BuildOptionCollection Name="BuildOptions" EnforceUniqueItems="True">

@@ -114,7 +114,9 @@ adapter up at boot, before the USB device exists. TCP/IP binds without it.
 - **Threads:** RX and TX run at CE priority 130 (above applications, below the USB IST at 101); the
   link thread at normal priority.
 
-### Registry (`files/platform.reg`, under `IF BSP_NOUSB !`)
+### Registry (`files/platform.reg`, under `IF BSP_ETHERNET`)
+
+The driver is in the image only with `BSP_ETHERNET=1` (catalog item "USB Ethernet (SMSC LAN95xx)"), which also needs `BSP_USBHOST=1` ("USB host controller (DWC OTG)").
 
 | Key | Values |
 |---|---|

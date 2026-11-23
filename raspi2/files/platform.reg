@@ -82,22 +82,27 @@ ENDIF BSP_NODISPLAY !
 
 
 ; USB - DesignWare OTG (DWC2) USB host controller driver (src\drivers\dwchci)
-; Loaded at boot. Set BSP_NOUSB=1 to leave it out.
+; Loaded at boot. Optional: set BSP_USBHOST=1 (catalog item "USB host
+; controller (DWC OTG)"). BSP_NOUSB=1 (which also drops the stock USB stack)
+; leaves it out too.
 ; DmaBusOffset is added to a physical address to get the bus address the
 ; controller uses for DMA (assumed 0x40000000 on the BCM2835, not verified).
 ; The IClass values are added once the driver creates a real HCD object.
 ; @CESYSGEN IF CE_MODULES_USBD
 IF BSP_NOUSB !
+IF BSP_USBHOST
 [HKEY_LOCAL_MACHINE\Drivers\BuiltIn\DWCUsbHost]
    "Prefix"="HCD"
    "Dll"="dwchci.dll"
    "Order"=dword:30
    "DmaBusOffset"=dword:40000000
+ENDIF BSP_USBHOST
 ENDIF BSP_NOUSB !
 ; @CESYSGEN ENDIF CE_MODULES_USBD
 
 ; SD host controller driver (src\drivers\sdhcbcm): the BCM2835 PDD over the CE
-; standard SD host MDD. Set BSP_NOSD=1 to leave it out.
+; standard SD host MDD. Optional: set BSP_SDHOST=1 (catalog item "SD card host
+; controller (Arasan eMMC)").
 ; With BSP_SDROOT=1 (SD card as root file system, see below) the key goes into
 ; the boot hive so the device manager loads it in boot phase 1, together with
 ; the SD bus driver. ONLY then: the device manager loads every BuiltIn driver
@@ -107,7 +112,7 @@ ENDIF BSP_NOUSB !
 ; fmerge drops the marker comments inside a false IF.
 ; WARNING: never start a comment line with the boot-section marker text; the
 ; registry compiler treats such a line as a marker even if more text follows.
-IF BSP_NOSD !
+IF BSP_SDHOST
 IF BSP_SDROOT
 ; HIVE BOOT SECTION
 ENDIF BSP_SDROOT
@@ -145,11 +150,11 @@ ENDIF BSP_SDROOT
 IF BSP_SDROOT
 ; END HIVE BOOT SECTION
 ENDIF BSP_SDROOT
-ENDIF BSP_NOSD !
+ENDIF BSP_SDHOST
 
 ;------------ SD card as root file system (BSP_SDROOT) -----------------------
 ; Catalog item "SD card as root file system" sets BSP_SDROOT=1. Needs the SD
-; driver (do not set BSP_NOSD). See docs\sdroot.md.
+; driver (BSP_SDHOST=1). See docs\sdroot.md.
 ;
 ; The FAT partition on the SD card (the boot partition: bootcode.bin,
 ; kernel.img, ...) is mounted as "\" instead of "\Storage Card". "\Windows" is
@@ -177,7 +182,7 @@ ENDIF BSP_NOSD !
 ; file system ever performs a clean boot of the root volume (that code is in
 ; filesys.dll, which has no source here, so this is a precaution).
 IF BSP_SDROOT
-IF BSP_NOSD !
+IF BSP_SDHOST
 ; HIVE BOOT SECTION
 [HKEY_LOCAL_MACHINE\init\BootVars]
    ; 1 = storage manager, 2 = device manager in boot phase 1
@@ -257,7 +262,7 @@ IF BSP_NOSD !
    "\\overlays"=dword:0
    "\\Windows"=dword:0
 ; END HIVE BOOT SECTION
-ENDIF BSP_NOSD !
+ENDIF BSP_SDHOST
 ENDIF BSP_SDROOT
 
 ; Analog audio - Pi 1 3.5 mm jack (src\drivers\pwmaudio). PWM on GPIO40/45
@@ -297,10 +302,13 @@ ENDIF BSP_NOAUDIO !
 
 ; USB Ethernet - SMSC LAN9512/LAN9514 (src\drivers\smsc95xx), the on-board
 ; Ethernet of the Pi 1 Model B/B+. USBD loads it for the Ethernet function,
-; VID 0x0424 (1060) / PID 0xEC00 (60416). Part of the USB set: BSP_NOUSB=1
+; VID 0x0424 (1060) / PID 0xEC00 (60416). Optional: set BSP_ETHERNET=1
+; (catalog item "USB Ethernet (SMSC LAN95xx)"), needs BSP_USBHOST=1. BSP_NOUSB=1
 ; leaves it out.
 ; @CESYSGEN IF CE_MODULES_USBD
 IF BSP_NOUSB !
+IF BSP_USBHOST
+IF BSP_ETHERNET
 [HKEY_LOCAL_MACHINE\Drivers\USB\LoadClients\1060_60416\Default\Default\SMSC95XX]
    "DLL"="smsc95xx.dll"
 [HKEY_LOCAL_MACHINE\Drivers\USB\ClientDrivers\SMSC95XX]
@@ -331,6 +339,8 @@ IF BSP_NOUSB !
    "Subnetmask"="0.0.0.0"
    "DefaultGateway"="0.0.0.0"
    "UseZeroBroadcast"=dword:0
+ENDIF BSP_ETHERNET
+ENDIF BSP_USBHOST
 ENDIF BSP_NOUSB !
 ; @CESYSGEN ENDIF CE_MODULES_USBD
 

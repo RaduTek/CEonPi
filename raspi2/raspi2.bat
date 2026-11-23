@@ -32,10 +32,18 @@ rem
 set IMGFLASH=1
 
 rem
-rem BSP_NOSD=1 leaves out the SD host controller driver (currently the M0
-rem probe in src\drivers\sdhcbcm). Leave it unset to include the driver.
+rem The drivers below are opt-in. Each catalog item sets the same variable
+rem (see "Catalog items" in README.md):
+rem BSP_USBHOST=1  USB host controller driver (src\drivers\dwchci).
+rem BSP_ETHERNET=1 SMSC LAN95xx USB Ethernet (src\drivers\smsc95xx), needs
+rem                BSP_USBHOST=1.
+rem BSP_SDHOST=1   SD card host controller driver (src\drivers\sdhcbcm).
+rem BSP_NOUSB=1 (a standard variable, also read by common.bib/common.reg)
+rem leaves out the whole USB stack, the BSP drivers included.
 rem
-rem set BSP_NOSD=1
+rem set BSP_USBHOST=1
+rem set BSP_ETHERNET=1
+rem set BSP_SDHOST=1
 
 rem
 rem BSP_IDLEMON=1 adds the CPU idle monitor demo (src\apps\idlemon) to the
@@ -55,7 +63,7 @@ rem
 rem BSP_SDROOT=1 mounts the SD card (the FAT boot partition) as the root file
 rem system "\" instead of "\Storage Card", loading the SD drivers in boot
 rem phase 1. The card's Windows folder is merged into \Windows over the ROM
-rem image. Needs the SD driver (BSP_NOSD unset). The catalog item "SD card as
+rem image. Needs the SD driver (BSP_SDHOST=1). The catalog item "SD card as
 rem root file system" sets the same variable. See docs\sdroot.md.
 rem
 rem set BSP_SDROOT=1

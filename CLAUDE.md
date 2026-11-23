@@ -48,6 +48,15 @@ controller so keyboards, mice and USB Ethernet work.
   `\Windows\Registry` (OAL answers `IOCTL_HAL_GET_HIVE_CLEAN_FLAG` "keep"), and `config.bib`
   shrinks `FSRAMPERCENT` (both through `@CESYSGEN` conditions on `FILESYS_FSYSRAM`). See
   `docs/sdroot.md`.
+- BSP drivers are opt-in catalog items (`raspi2/Catalog/raspi2.pbcxml`, 2026-11-23): `BSP_USBHOST`
+  (dwchci), `BSP_ETHERNET` (smsc95xx, nested inside `BSP_USBHOST`), `BSP_SDHOST` (sdhcbcm, replaced our
+  old opt-out `BSP_NOSD`), `BSP_AUDIO`, plus `BSP_USEVIDASDEBUGPORT` (OAL on-screen debug output for
+  no-KITL images). `BSP_NOUSB` is a **standard** variable read by the public `common.bib`/`common.reg`
+  (drops the whole USB stack), so keep it as an outer gate, never repurpose it. The sample design
+  `RaspiCE/RaspiCE/RaspiCE.pbxml` selects the driver items in all three configurations.
+  Core OS dependencies live in `raspi2/cebasecesysgen.bat` (`if "%BSP_X%"=="1" set SYSGEN_Y=1`,
+  the stock IMX313DS pattern; cesysgen.bat calls it first in each pass). Tested 2026-11-23: a
+  `<SysgenVariable>` on a BSP item does NOT make PB show or select dependencies.
 - `src/INC/`: `BCM2835.h` (peripheral registers), `dwcRegs.h` (DesignWare OTG registers,
   unverified against hardware), `image_cfg.h/.inc`, `bsp_cfg.h`.
 - `src/oal/oallib/`: `startup.s` (GPIO and UART setup), `init.c` (OEMInit, powers USB on through

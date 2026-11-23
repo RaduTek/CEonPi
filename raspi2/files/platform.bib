@@ -87,10 +87,19 @@ ENDIF BSP_NODISPLAY !
 ;giisr.dll          $(_FLATRELEASEDIR)\GIISR.dll                    NK     SHK
 ; @CESYSGEN ENDIF CE_MODULES_GIISR
 
+; USB host controller driver (src\drivers\dwchci). Optional: set
+; BSP_USBHOST=1 (catalog item "USB host controller (DWC OTG)"). BSP_NOUSB=1
+; leaves it out too; that variable also drops the stock USB stack (common.bib).
+; USB Ethernet (src\drivers\smsc95xx): BSP_ETHERNET=1 (catalog item "USB
+; Ethernet (SMSC LAN95xx)"), needs BSP_USBHOST=1.
 ; @CESYSGEN IF CE_MODULES_USBD
 IF BSP_NOUSB !
+IF BSP_USBHOST
     dwchci.dll         $(_FLATRELEASEDIR)\dwchci.dll                   NK     SHK
+IF BSP_ETHERNET
     smsc95xx.dll       $(_FLATRELEASEDIR)\smsc95xx.dll                 NK     SHK
+ENDIF BSP_ETHERNET
+ENDIF BSP_USBHOST
 IF BSP_USB_UHCI
 ;uhci.dll           $(_FLATRELEASEDIR)\uhci.dll                     NK     SHK
 ENDIF BSP_USB_UHCI
@@ -102,10 +111,11 @@ ENDIF BSP_NOUSB !
 
 ; SD host controller driver (src\drivers\sdhcbcm): BCM2835 PDD over the CE
 ; standard SD host MDD. Requires the SD stack in the OS design (sdbus.dll,
-; sdmemory.dll). Set BSP_NOSD=1 to leave it out.
-IF BSP_NOSD !
+; sdmemory.dll). Optional: set BSP_SDHOST=1 (catalog item "SD card host
+; controller (Arasan eMMC)").
+IF BSP_SDHOST
     sdhcbcm.dll        $(_FLATRELEASEDIR)\sdhcbcm.dll                  NK     SHK
-ENDIF BSP_NOSD !
+ENDIF BSP_SDHOST
 
 ; Analog audio driver (src\drivers\pwmaudio) for the Pi 1 3.5 mm jack.
 ; Optional: set BSP_AUDIO=1 (catalog item "Analog audio (Pi 1 3.5 mm jack)").
