@@ -69,7 +69,7 @@ Most of the work was done on the Pi Zero W. The Ethernet driver was developed an
 | Board | Features |
 |-|-|
 | Pi Zero (W) | HDMI, USB host |
-| Pi 1 Model B | HDMI, USB host, Ethernet |
+| Pi 1 Model B | HDMI, USB host, Ethernet, 3.5mm Audio |
 
 ## Catalog items
 
