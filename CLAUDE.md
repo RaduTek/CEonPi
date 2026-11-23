@@ -14,10 +14,13 @@ controller so keyboards, mice and USB Ethernet work.
   **cannot build or run anything**.
 - The build happens in a Windows 7 VM (Platform Builder 7 + Visual Studio 2008 SP1) at
   `C:\WINCE700`. This repo is the contents of `C:\WINCE700\platform\raspi2`.
-- The user pulls changes in the VM, builds, copies `kernel.img` to the SD card, boots the Pi
-  and reports results (serial/KITL logs, photos of the screen, build logs).
+- The VM builds straight from this working tree (no commit or pull needed to test). The user
+  builds, copies `kernel.img` to the SD card, boots the Pi and reports results (serial/KITL logs,
+  photos of the screen, build logs, `bootlog.txt` in the repo root, which is gitignored).
 - After every change, say exactly what to build, what to expect, and which log lines or
-  behaviour confirm success. Prefer small, separately testable changes and small commits.
+  behaviour confirm success. Prefer small, separately testable changes.
+- **Only tested code gets committed** (since 2026-11-23). Leave changes uncommitted until the user
+  reports a successful test, then commit when asked (feature work goes on a branch, e.g. `vc4-gpu`).
 - Never claim hardware behaviour you have not verified. State assumptions plainly and say how to
   test them. If a register or bit is uncertain, say so.
 
@@ -51,7 +54,11 @@ controller so keyboards, mice and USB Ethernet work.
 - BSP drivers are opt-in catalog items (`raspi2/Catalog/raspi2.pbcxml`, 2026-11-23): `BSP_USBHOST`
   (dwchci), `BSP_ETHERNET` (smsc95xx, nested inside `BSP_USBHOST`), `BSP_SDHOST` (sdhcbcm, replaced our
   old opt-out `BSP_NOSD`), `BSP_AUDIO`, plus `BSP_USEVIDASDEBUGPORT` (OAL on-screen debug output for
-  no-KITL images). `BSP_NOUSB` is a **standard** variable read by the public `common.bib`/`common.reg`
+  no-KITL images). Display drivers are two mutually exclusive items (`<ChooseOneGroup>`, Location
+  `Device Drivers\Display`): `BSP_VC4DISP` (vc4disp) and `BSP_RASPIDISPLAY` (raspiBasic_ddi), replacing
+  the old opt-out `BSP_NORASPIDISPLAY`; `platform.bib`/`.reg` let vc4disp win if both are set; with
+  neither the image is headless (untested). `BSP_NODISPLAY` (standard, `common.bib`/`.reg`) stays the
+  outer gate. `BSP_NOUSB` is a **standard** variable read by the public `common.bib`/`common.reg`
   (drops the whole USB stack), so keep it as an outer gate, never repurpose it. The sample design
   `RaspiCE/RaspiCE/RaspiCE.pbxml` selects the driver items in all three configurations.
   Core OS dependencies live in `raspi2/cebasecesysgen.bat` (`if "%BSP_X%"=="1" set SYSGEN_Y=1`,
@@ -63,7 +70,8 @@ controller so keyboards, mice and USB Ethernet work.
   the mailbox), interrupt and debug code. The OAL already maps a USB host SYSINTR to VideoCore
   IRQ 9.
 - `src/kitl/` and `src/MyKitlCore/`: KITL over the PL011 UART (`kitlSerDrv.c`).
-- `src/drivers/raspiBasic_ddi/`: display driver (framebuffer through the mailbox).
+- `src/drivers/raspiBasic_ddi/`: original display driver (framebuffer through the mailbox), kept as a
+  fallback. `src/drivers/vc4disp/`: its successor (see "Display driver" below).
 - `src/bootloader/sboot`, `sloader`: bootloaders (not used when `IMGFLASH=1`).
 
 ## Boot and hardware facts learned so far
@@ -297,6 +305,132 @@ ARM1176.
     (`src\oal\oallib\ioctl.c`, the handler line was commented out) via the common
     `OALIoCtlHalGetCacheInfo` over `g_oalCacheInfo`. It was broken (returned FALSE -> `CeGetCacheInfo`
     failed), which a future DMA path would need; it is harmless to PIO.
+
+## Display driver: vc4disp (started 2026-11-23)
+- `src\drivers\vc4disp` (`vc4disp.dll`, class `Vc4GPE`, GPE based) replaces `raspiBasic_ddi` step by
+  step; the old driver stays as the fallback catalog item.
+- How both work today: the OAL allocates the framebuffer at boot (`InitVideoSystem`, 16 bpp =
+  `VID_BITSPP`) and describes it as the single mode of `IOCTL_HAL_DDI` (`src\oal\oallib\ddi.c`). The
+  `phFrameBase` field carries the **uncached static VA** (`0xA0000000 | pa`), not a physical address.
+  `DDHAL_COMMAND_SET_MODE` only stops the on-screen console/splash; `SetPalette`/`Power` are stubs.
+  All drawing is GPE software emulation with a software cursor.
+- **D0 done and verified (2026-11-23, Pi 1 Model B):** vc4disp loads and boots to the desktop; log
+  line `vc4disp: mode 1 1920x1080 16 bpp stride 3840 fb 0xae7fe000` (GWES passes the OAL's `modeId`
+  1, which the OAL ignores; `fb` is the uncached `0xA...` view as expected).
+- **D1 done and verified (2026-11-23, Pi 1 Model B):** GDI draws through the cached static view
+  (`0x8...`, the OAL address table maps all 512 MB) and `FlushRect` cleans the D-cache over the touched
+  rows after each blit (`BltComplete`, dst rect), line (bounds + 1 px) and cursor draw/erase. Registry
+  `CachedFrameBuffer` (default 1, 0 = old uncached). UI renders correctly. `gdibench.exe`
+  (`src\apps\gdibench`, `BSP_GDIBENCH`) at 1920x1080x16, uncached -> cached, kpix/s: Fill 21430 ->
+  46071, Invert 1635 -> 2146, Scroll 40135 -> 80575, Text 5022 -> 5609, Upload 36714 -> 43319,
+  Readback 21779 -> 40546.
+- GPE emulation fast paths at 16 bpp (`public\common\oak\drivers\display\emulrotate\ebbltsel.cpp`
+  `EmulatedBltSelect16`): BLACKNESS/WHITENESS, solid PATCOPY, text (0xAAF0), same-format SRCCOPY/SRCAND/
+  SRCPAINT/SRCINVERT, 1/4 bpp -> 16 copies. Everything else (DSTINVERT, format conversion `pConvert`
+  e.g. 24/32 bpp DIB -> screen, stretch, transparent, alpha) falls to the generic per-pixel path:
+  ~2 Mpix/s (the Invert result), i.e. ~1 s per full 1080p screen. Measured with the extended gdibench
+  (D1 driver, kpix/s): Up565 42839, Up24 2055, Up32 1862, Stretch 1659, Transp 1767, AlphaC 1003,
+  AlphaP 740 - this is why IE7 takes ~1 s to paint a page.
+- `GPE::EmulatedBlt` (`gpe\swblt.cpp` `SelectBlt`) already tries three libraries inside `gpe.lib`:
+  `FastBltSelect` (`emulrotate\fastblt.cpp`: 32->565 copy, 32->565 and 16->16 alpha, 16->16
+  transparent, ...), `EmulatedBltSelectNN`, and GenBlt (`genblt`, a run-time blit code generator; it
+  skips alpha and transparent). **`FastBltSelect` returns at once unless the global `g_fUseFastBlt`
+  (C++ `?g_fUseFastBlt@@3HA`, default FALSE, nothing in the public tree sets it) is TRUE**; the driver
+  sets it (registry `FastBlt`). GenBlt's ARM generator is compiled only under `USE_GENERATED_BLTS`
+  (`cpulibs\arm\genblt_cpu\genblt_arm.cpp`); whether the shipped lib has it is unknown, so the driver
+  logs `g_CpuFuncs.pfnPCodeToCpuCode`. GPE fills a surface's mask palette (`FormatPtr()`) from the
+  XLATEOBJ on first use (`ddi_if.cpp` `SetSurfaceFormat`), which the 565 checks rely on.
+- **FastBlt measured (2026-11-23, Pi 1 Model B):** log `vc4disp: FastBlt on, GenBlt code generator off`
+  (the shipped ARMv6 GenBlt has no code generator). kpix/s off -> on: Stretch 1659 -> 11943, Transp
+  1767 -> 20525, AlphaC 1003 -> 5954, AlphaP 740 -> 3862. Up24/Up32/Invert unchanged (no FastBlt
+  routine; FastBlt's 32->565 copy wants a source with an alpha mask, plain 32 bpp DIBs lack one), so
+  `vc4blt.cpp` adds the driver's own 24/32 bpp -> 565 copies and 16 bpp DSTINVERT (registry
+  `DriverBlt`), gated by probing GPE's colour converter with known colours (`ConverterIs888To565`).
+- **DriverBlt verified (2026-11-23, Pi 1 Model B):** kpix/s before -> after: Up24 2082 -> 16023, Up32
+  1882 -> 13290, Invert 2145 -> 26607. gdibench's three source tiles (565/24/32 bpp) match, UI and
+  IE7 render correctly, IE7 paints pages much faster. Remaining: some lag between mouse-wheel scroll and
+  the screen update in IE7 (not investigated).
+- **D3 hardware cursor verified (2026-11-23, Pi 1 Model B):** OAL `IOCTL_HAL_MY_MAILBOX_PROPERTY`
+  (`ioctl.c` `OALIoCtlHalMailboxProperty`, code in `image_cfg.h`) sends a caller-built list of property
+  tags (only `0x0004xxxx` frame buffer and `0x00008010/11` cursor tags, max 1 KB) through the shared
+  mailbox buffer. `vc4cursor.cpp` converts CE's AND/XOR masks to 32 bpp ARGB in an uncached
+  `AllocPhysMem` buffer and passes its **bus address `0xC0000000 | pa` (works)** to Set cursor info
+  (`0x00008010`: w, h, unused, ptr, hotX, hotY; response 0 = valid), then Set cursor state (`0x00008011`:
+  enable, x, y, flags=1 framebuffer coords) on every `MovePointer`. 32x32 shapes accepted; arrow, I-beam
+  and wait cursors look right; arrow tip and I-beam hotspot both match where clicks land, so (x, y) in
+  Set cursor state is the hotspot position. AND=1/XOR=1 (invert) pixels are
+  drawn black. Registry `HwCursor` (default 1); any rejected call logs and falls back to the software
+  cursor. Log: `vc4disp: hardware cursor on (32x32, hotspot 0,0, image at bus 0xc1854000)`.
+- **D4 DMA blits (in progress, 2026-11-23):** `vc4dma.cpp`, DMA channel 5 (`DISP_DMA_CHANNEL`,
+  `SYSINTR_DISPDMA` = GPU IRQ 21 in the OAL), one control block per row, fills and screen-to-screen
+  copies >= `DmaMinPixels`. Firmware "get DMA channels" (tag `0x00060001`) returns **`0x7ff5`** on the
+  Pi 1 B (Linux's DT mask is `0x7f35`). **Burst length is critical (verified):** 128-bit transfers with
+  `DmaBurst`=8 lost the HDMI signal as soon as the desktop was filled (bus offset `0x40000000`; no DMA
+  error, firmware still answered mailbox calls) or hung the whole system on the first fill
+  (`0xC0000000`, heartbeat LED stopped). `DmaBurst`=0 with `0x40000000` works: fills land in the right
+  place, `solidColor` is already RGB565 (desktop `0x3b74`, taskbar `0xef5b`). Code defaults: `DmaBlt` 0,
+  `DmaBurst` 0. Measured with burst 0 (gdibench kpix/s, CPU -> DMA): **Fill 45393 -> 68157 (1.5x)**,
+  **Scroll 81138 -> 52432 (slower)**; a copy has to read every beat and single transfers cannot hide
+  the read latency. So copies stay on the CPU unless registry `DmaCopy`=1 (default 0); worth retrying
+  with `DmaBurst` 2 or 4 (8 broke the bus). Verified with `DmaCopy`=0: Fill 68517 (DMA), Scroll 80151
+  (CPU). **`DmaBurst`=2 did not hang**, but fills came out as vertical stripes (8 px colour, 8 px black):
+  within a burst the engine reads consecutive source addresses even with `SRC_INC` off, so the fill
+  pattern is now 256 bytes (16 beats x 16 bytes) of the colour. With that fixed, **`DmaBurst`=2 hung the
+  whole system** on the 6th fill, right after `PWMAUD: open` (audio DMA channel 4 starting). Bursts are
+  unsafe on this silicon in our setup (cause unproven: misaligned wide bursts, or two channels
+  contending); burst 0 with audio running is fine. **Decision: D4 = DMA fills only, burst 0**
+  (code defaults `DmaBlt` 1, `DmaCopy` 0, `DmaBurst` 0).
+- **RawFrameBuffer (in progress, 2026-11-23):** `vc4escape.cpp` answers `GETRAWFRAMEBUFFER`
+  (`0x00020001`, Windows Mobile escape; not in the CE 7 headers) by mapping the framebuffer into the
+  calling process (`VirtualAllocEx` + `VirtualCopyEx` `PAGE_PHYSICAL` uncached, then
+  `VirtualProtectEx` `PAGE_WRITECOMBINE`; one mapping per call). Once handed out, `FlushRect` cleans
+  *and invalidates*. Motivation: TCPMP (`C:\Dev\TCPMP`, `common/overlay/overlay_raw.c`) ranks outputs
+  DirectDraw (+100), RawFrameBuffer (+95), GAPI (+50), GDI; its GDI path converts and scales into a
+  DIB of the output size and then `BitBlt`s it unscaled, which at 1920x1080 costs ~48 ms/frame for the
+  copy alone, so 360p video only keeps up at 100% zoom. DirectDraw is not worth doing without a
+  hardware YUV overlay.
+- **RawFrameBuffer verified (2026-11-23, Pi 1 Model B):** TCPMP picks it automatically and plays
+  better, but 360p scaled to 1920x1080 is still not real time (fine at lower desktop resolutions).
+- **Cursor moves froze video (fix in progress):** `MovePointer` sent "Set cursor state" synchronously
+  for every mouse report from GWES's input thread, and the OAL's `MailboxGetMail`
+  (`src\Common\VidConDebugOut\mailbox.cpp`) **busy-waits** for the firmware's reply inside
+  `KernelIoControl`, at that thread's high priority, starving lower-priority threads (TCPMP
+  decode) and holding GWES locks (GDI mode). Fix: `MovePointer` only queues the newest position; a
+  cursor thread (priority 110) sends it at most once per `HwCursorInterval` ms (default 8) and logs
+  call timing (`vc4disp: cursor: N firmware calls for M moves, call avg X us, max Y us`).
+  **Measured: each "Set cursor state" call takes ~2.2 ms (max ~3.2 ms)** of OAL busy-waiting; ~1.3
+  moves per call at 8 ms, so ~20-25% CPU at priority 110 while the mouse moves. Video still stutters,
+  a little less. Next: a non-spinning (asynchronous) mailbox path in the OAL (written, untested):
+  `IOCTL_HAL_MY_MAILBOX_ASYNC` SEND (OAL checks the caller's complete message in its own uncached
+  buffer, posts it, returns) / POLL (reads arrived replies without waiting) / ABANDON. Replies carry
+  the message address (data bits), so `OALPropertyWaitReply` in every synchronous path only takes its
+  own reply and marks the pending async one as done if it sees it (`MailboxPollMail`, new in
+  `mailbox.cpp`). The cursor thread posts "Set cursor state" and polls with `Sleep(1)`; falls back to
+  synchronous calls if the IOCTL is missing or a reply times out (100 ms). **Verified (2026-11-23):**
+  calls run `async` (~1.9-2.0 ms each, spent sleeping), no `OAL mailbox: dropped` lines, MAC, SD and
+  cursor fine; video stutter while moving the mouse is reduced to acceptable levels (not gone).
+  TCPMP's `PLAYER.EXE` logs an `Undefined Instruction` exception in `common.dll` after
+  `ERROR!!! Calling SetKMode`: its own CPU detection, caught by its handler, harmless. Latent, not
+  investigated: the System control panel never showed the CPU speed (`OALIoCtlProcessorInfo` fills
+  `dwClockSpeed`). Also seen:
+  `VirtualProtectEx` `PAGE_WRITECOMBINE` fails, so the RawFrameBuffer mapping stays uncached.
+- **Future goal (user, 2026-11-23): VCHIQ.** The real video acceleration path: HVS YUV planes
+  (hardware scaling and colour conversion through dispmanx) and hardware decode (MMAL/OpenMAX) are
+  only reachable through the firmware's VCHIQ interface, not the mailbox. A DirectDraw overlay would
+  sit on top of that.
+- **D2 dropped (user decision, 2026-11-23):** the firmware already picks the native resolution per
+  display and `config.txt` can override it, which beats registry settings plus an image rebuild.
+  Depth stays **16 bpp RGB565**, fixed at compile time by `VID_BITSPP` (`image_cfg.h`) and requested by
+  the OAL's `InitVideoSystem`, so `config.txt` `framebuffer_depth` has no effect. 24 bpp would need the
+  OAL's 24 bpp masks in `GetVideoSettings` fixed (they are 32-bit positions) and has no fast blit paths;
+  the boot console does not support 32 bpp.
+- Plan: D0 copy + clean-up (no behaviour change);
+  D1 speed up drawing (GDI reads from uncached memory: cached shadow surface or write-combined
+  mapping); D2 driver-owned mode set through a generic mailbox property-tag IOCTL (16/32 bpp, blanking
+  for `PowerHandler`); D3 firmware hardware cursor (tags `0x00008010/11`, unverified); D4 DMA fills and
+  copies (bus addresses, interrupt, free channel; raspiBasic's disabled code used channel 1, which the
+  Linux DT mask `0x7f35` reserves for the VideoCore - check); D5 optional DirectDraw flip/vsync. V3D
+  (OpenGL ES) is out of scope.
 
 ## Power: idle, restart, shutdown (2026-11-21)
 - **Idle:** `OEMIdle` (`src\oal\oallib\power.c`) does drain-write-buffer + CP15 WFI

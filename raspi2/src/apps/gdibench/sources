@@ -1,0 +1,16 @@
+# GDI benchmark (src\apps\gdibench, gdibench.exe).
+#
+# Times fills, inverts, scrolling, text, uploads and readbacks through the
+# display driver. Included in the image only when BSP_GDIBENCH=1 (catalog
+# item "GDI benchmark (gdibench.exe)"). Needs GWES.
+
+TARGETNAME=gdibench
+TARGETTYPE=PROGRAM
+EXEENTRY=WinMainCRTStartup
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\corelibc.lib \
+
+SOURCES= \
+    gdibench.cpp

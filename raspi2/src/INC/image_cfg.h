@@ -108,6 +108,45 @@ extern "C" {
 // OALIoCtlHalGetMacAddress in ioctl.c.
 #define IOCTL_HAL_MY_GET_MAC_ADDRESS         CTL_CODE(FILE_DEVICE_HAL, 2048+13, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
+// Sends a list of VideoCore property tags in one mailbox message (the display
+// driver uses it for the frame buffer and the hardware cursor). Input: the
+// tags back to back, each [tag id][value buffer size in bytes][0][values...],
+// without the message header or end tag. Output (may be the same buffer, at
+// least as large): the same tags as the VideoCore answered them. Only frame
+// buffer (0x0004xxxx), cursor (0x00008010, 0x00008011) and "get DMA channels"
+// (0x00060001) tags are accepted,
+// at most RASPI_MAILBOX_MAX_TAG_BYTES. The IOCTL fails if the message as a
+// whole is rejected; the caller checks each tag's response bit (0x80000000 in
+// the third word) and values. Handler: OALIoCtlHalMailboxProperty in ioctl.c.
+#define IOCTL_HAL_MY_MAILBOX_PROPERTY        CTL_CODE(FILE_DEVICE_HAL, 2048+14, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define RASPI_MAILBOX_MAX_TAG_BYTES          1024
+
+// Asynchronous property message, so the caller does not busy-wait for the
+// VideoCore (a cursor move takes ~2.2 ms). Input: RASPI_MAILBOX_ASYNC.
+//  SEND:    pvMessage is a complete property message (size, request code 0,
+//           tags with the same rules as IOCTL_HAL_MY_MAILBOX_PROPERTY, end
+//           tag) in the caller's physically contiguous memory, already in
+//           RAM (uncached, write buffer drained); dwBusAddr is its VideoCore
+//           bus address (16-byte aligned). The OAL checks it, posts it and
+//           returns at once. Fails if a message is already pending.
+//  POLL:    output DWORD: 1 = the VideoCore has answered (the reply is in
+//           the caller's buffer and the request is finished), 0 = not yet.
+//  ABANDON: forget the pending message (after a timeout; a late reply is
+//           then discarded).
+// Only one asynchronous message can be pending. Handler:
+// OALIoCtlHalMailboxAsync in ioctl.c.
+#define IOCTL_HAL_MY_MAILBOX_ASYNC           CTL_CODE(FILE_DEVICE_HAL, 2048+15, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define RASPI_MAILBOX_ASYNC_SEND             1
+#define RASPI_MAILBOX_ASYNC_POLL             2
+#define RASPI_MAILBOX_ASYNC_ABANDON          3
+
+typedef struct {
+	DWORD dwCommand;        // RASPI_MAILBOX_ASYNC_xxx
+	DWORD dwBusAddr;        // SEND: bus address of the message
+	VOID *pvMessage;        // SEND: kernel virtual address of the message
+	DWORD cbMessage;        // SEND: message size in bytes (= its first word)
+} RASPI_MAILBOX_ASYNC;
+
 // Structure used by the interrupt code to manage the serial FIFO buffers
 typedef struct {
 	PBYTE pRecvBuff;

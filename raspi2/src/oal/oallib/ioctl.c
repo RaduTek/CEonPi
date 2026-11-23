@@ -57,6 +57,14 @@ BOOL OALIoCtlHalReboot(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 							  VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
 
+// Sends a list of frame buffer / cursor property tags (for the display driver).
+BOOL OALIoCtlHalMailboxProperty(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+								VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
+// Asynchronous property message: send / poll / abandon (display driver).
+BOOL OALIoCtlHalMailboxAsync(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
+
 // Tells filesys never to delete the registry hives at boot (defined below).
 BOOL OALIoCtlHalGetHiveCleanFlag(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 								 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize);
@@ -114,6 +122,8 @@ const OAL_IOCTL_HANDLER g_MyoalIoCtlTable[] =
 { IOCTL_HAL_MY_GET_HARDWARE_POINTERS,         0,  OALIoCtlHalGetHardwarePtrs     },
 { IOCTL_HAL_MY_GET_EMMC_CLOCK,                0,  OALIoCtlHalGetEmmcClock        },
 { IOCTL_HAL_MY_GET_MAC_ADDRESS,               0,  OALIoCtlHalGetMacAddress       },
+{ IOCTL_HAL_MY_MAILBOX_PROPERTY,              0,  OALIoCtlHalMailboxProperty     },
+{ IOCTL_HAL_MY_MAILBOX_ASYNC,                 0,  OALIoCtlHalMailboxAsync        },
 { IOCTL_HAL_DDI,                              0,  OALIoctlHalDdi   },
 
 // Required Termination
@@ -160,7 +170,12 @@ BOOL OEMIoControl(DWORD dwIoControlCode, LPVOID lpInBuf, DWORD nInBufSize, PVOID
     UINT32 dwIndex;
 
 #ifdef DEBUG
-	NKDbgPrintfW(L"OEMIoControl: Code 0x%x Fn:%d\r\n", dwIoControlCode, (dwIoControlCode >> 2) & 0x0fff);
+	// Not for the mailbox IOCTLs: the display driver's cursor thread calls
+	// them for every cursor move (polling every millisecond), and each KITL
+	// debug line costs about 30 ms.
+	if ((dwIoControlCode != IOCTL_HAL_MY_MAILBOX_PROPERTY) &&
+		(dwIoControlCode != IOCTL_HAL_MY_MAILBOX_ASYNC))
+		NKDbgPrintfW(L"OEMIoControl: Code 0x%x Fn:%d\r\n", dwIoControlCode, (dwIoControlCode >> 2) & 0x0fff);
 #endif
 
     OALMSG(OAL_IOCTL&&OAL_FUNC, (L"+OEMIoControl(0x%x, 0x%x, %d, 0x%x, %d, 0x%x)\r\n", 
@@ -526,6 +541,59 @@ BOOL OALIoCtlHalGetHardwarePtrs(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 
 //------------------------------------------------------------------------------
 //
+//  Asynchronous property message state (OALIoCtlHalMailboxAsync). All users
+//  of the property channel run under the OAL IOCTL critical section, except
+//  OEMInit, which runs before anything asynchronous exists.
+//
+//  A property reply carries the address of the message it answers (the data
+//  bits, address >> 4), so every wait below checks it: a synchronous caller
+//  only accepts the reply to its own message, and if it meets the reply to
+//  the pending asynchronous message first it marks that one as answered.
+//  Replies nobody waits for (an abandoned message) are dropped.
+//
+static DWORD g_dwAsyncSent = 0;         // data value of the pending message, 0 = none
+static BOOL  g_fAsyncDone = FALSE;      // its reply has arrived
+
+#define RASPI_PROPERTY_WAIT_LOOPS      50000000
+
+// Classifies one raw mailbox message. Returns TRUE if it answers dwWanted.
+static BOOL OALPropertyTakeReply(DWORD dwRaw, DWORD dwWanted)
+{
+	DWORD dwData = dwRaw >> 4;
+
+	if ((dwRaw & 0x0F) != MAILBOX_CHAN_PROPARM2VC)
+	{
+		OALMSG(1, (L"OAL mailbox: dropped message 0x%08x on channel %d\r\n",
+			dwRaw, dwRaw & 0x0F));
+		return FALSE;
+	}
+	if ((dwWanted != 0) && (dwData == dwWanted))
+		return TRUE;
+	if ((g_dwAsyncSent != 0) && (dwData == g_dwAsyncSent))
+	{
+		g_fAsyncDone = TRUE;
+		return FALSE;
+	}
+	OALMSG(1, (L"OAL mailbox: dropped unexpected property reply 0x%08x\r\n", dwRaw));
+	return FALSE;
+}
+
+// Busy-waits for the reply to the synchronous message whose data value
+// (bus address >> 4) is dwSent. Returns 0, or -1 on a timeout.
+static int OALPropertyWaitReply(DWORD dwSent)
+{
+	DWORD dwRaw, i;
+
+	for (i = 0; i < RASPI_PROPERTY_WAIT_LOOPS; i++)
+	{
+		if ((MailboxPollMail(0, &dwRaw) == 0) && OALPropertyTakeReply(dwRaw, dwSent))
+			return 0;
+	}
+	return -1;
+}
+
+//------------------------------------------------------------------------------
+//
 //  Function:  OALMailboxPropertyTag
 //
 //  Sends one VideoCore property tag over the property mailbox channel and
@@ -545,7 +613,6 @@ BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords)
 {
 	volatile DWORD *pBuff = 0;
 	DWORD dwBuffSize = 0;
-	DWORD dwResp = 0;
 	DWORD cbTotal;
 	DWORD i;
 	int rc;
@@ -585,7 +652,7 @@ BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords)
 
 	rc = MailboxSendMail(0, MAILBOX_CHAN_PROPARM2VC, ((DWORD)pBuff) >> 4);
 	if (rc == 0)
-		rc = MailboxGetMail(0, MAILBOX_CHAN_PROPARM2VC, &dwResp);
+		rc = OALPropertyWaitReply(((DWORD)pBuff) >> 4);
 	if (rc != 0)
 		return FALSE;
 
@@ -602,6 +669,218 @@ BOOL OALMailboxPropertyTag(DWORD dwTag, DWORD *pdwValues, DWORD nWords)
 		pdwValues[i] = pBuff[5 + i];
 
 	return TRUE;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  OALIoCtlHalMailboxProperty
+//
+//  Implements IOCTL_HAL_MY_MAILBOX_PROPERTY (see image_cfg.h): sends the
+//  caller's tag list as one property message through the shared mailbox
+//  buffer, with the same cache handling as OALMailboxPropertyTag, and copies
+//  the answered tags back. Runs under the OAL IOCTL critical section, so it
+//  does not race the other users of the shared buffer.
+//
+//  Every tag must be a frame buffer tag (0x0004xxxx: get, test and set), one
+//  of the two cursor tags or "get DMA channels"; the list must end exactly
+//  after its last tag.
+//
+#define RASPI_PROPTAG_SET_CURSOR_INFO   0x00008010
+#define RASPI_PROPTAG_SET_CURSOR_STATE  0x00008011
+#define RASPI_PROPTAG_GET_DMA_CHANNELS  0x00060001
+
+static BOOL IsAllowedDisplayTag(DWORD dwTag)
+{
+	return ((dwTag & 0xFFFF0000) == 0x00040000) ||
+		   (dwTag == RASPI_PROPTAG_SET_CURSOR_INFO) ||
+		   (dwTag == RASPI_PROPTAG_SET_CURSOR_STATE) ||
+		   (dwTag == RASPI_PROPTAG_GET_DMA_CHANNELS);
+}
+
+BOOL OALIoCtlHalMailboxProperty(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+								VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	const DWORD *pTags = (const DWORD *)pInpBuffer;
+	volatile DWORD *pBuff = 0;
+	DWORD dwBuffSize = 0;
+	DWORD nWords, nValueWords, iWord, i, cbTotal;
+	int rc;
+
+	UNREFERENCED_PARAMETER(code);
+
+	if (pOutSize != 0)
+		*pOutSize = 0;
+
+	if ((pInpBuffer == 0) || (pOutBuffer == 0) || (inpSize < 3 * sizeof(DWORD)) ||
+		(inpSize > RASPI_MAILBOX_MAX_TAG_BYTES) || ((inpSize & 3) != 0) ||
+		(outSize < inpSize))
+	{
+		NKSetLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	// Walk the tags: allowed ids, whole value buffers, nothing left over
+	nWords = inpSize / sizeof(DWORD);
+	iWord = 0;
+	while (iWord < nWords)
+	{
+		if ((iWord + 3 > nWords) || !IsAllowedDisplayTag(pTags[iWord]) ||
+			((pTags[iWord + 1] & 3) != 0))
+		{
+			NKSetLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+		nValueWords = pTags[iWord + 1] / sizeof(DWORD);
+		if (nValueWords > nWords - iWord - 3)
+		{
+			NKSetLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+		iWord += 3 + nValueWords;
+	}
+
+	// Message header (2 words) + tags + end tag
+	cbTotal = 2 * sizeof(DWORD) + inpSize + sizeof(DWORD);
+	if (MailboxGetMailboxBuffer(TRUE, (DWORD *)&pBuff, &dwBuffSize) != 0)
+		return FALSE;
+	if ((pBuff == 0) || (dwBuffSize < cbTotal))
+		return FALSE;
+
+	pBuff[0] = cbTotal;
+	pBuff[1] = 0x00000000;
+	for (i = 0; i < nWords; i++)
+		pBuff[2 + i] = pTags[i];
+	pBuff[2 + nWords] = 0x00000000;
+
+	OEMCacheRangeFlush((VOID *)pBuff, cbTotal, CACHE_SYNC_WRITEBACK);
+
+	rc = MailboxSendMail(0, MAILBOX_CHAN_PROPARM2VC, ((DWORD)pBuff) >> 4);
+	if (rc == 0)
+		rc = OALPropertyWaitReply(((DWORD)pBuff) >> 4);
+	if (rc != 0)
+		return FALSE;
+
+	OEMCacheRangeFlush((VOID *)pBuff, cbTotal, CACHE_SYNC_DISCARD);
+
+	if (pBuff[1] != RASPI_PROPERTY_RESPONSE_OK)
+		return FALSE;
+
+	for (i = 0; i < nWords; i++)
+		((DWORD *)pOutBuffer)[i] = pBuff[2 + i];
+	if (pOutSize != 0)
+		*pOutSize = inpSize;
+
+	return TRUE;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  OALIoCtlHalMailboxAsync
+//
+//  Implements IOCTL_HAL_MY_MAILBOX_ASYNC (see image_cfg.h): posts a property
+//  message the caller built in its own buffer and returns at once; POLL then
+//  reads whatever replies have arrived without waiting. The display driver's
+//  cursor thread polls with Sleep(1) in between, so the ~2 ms the VideoCore
+//  takes is not spent spinning at the caller's priority.
+//
+BOOL OALIoCtlHalMailboxAsync(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
+							 VOID *pOutBuffer, UINT32 outSize, UINT32 *pOutSize)
+{
+	const RASPI_MAILBOX_ASYNC *pReq = (const RASPI_MAILBOX_ASYNC *)pInpBuffer;
+	const DWORD *pMsg;
+	DWORD nWords, nValueWords, iWord, dwRaw;
+
+	UNREFERENCED_PARAMETER(code);
+
+	if (pOutSize != 0)
+		*pOutSize = 0;
+	if ((pReq == 0) || (inpSize < sizeof(RASPI_MAILBOX_ASYNC)))
+	{
+		NKSetLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	switch (pReq->dwCommand)
+	{
+	case RASPI_MAILBOX_ASYNC_SEND:
+		if (g_dwAsyncSent != 0)
+		{
+			NKSetLastError(ERROR_BUSY);
+			return FALSE;
+		}
+		pMsg = (const DWORD *)pReq->pvMessage;
+		if ((pMsg == 0) || ((pReq->dwBusAddr & 0x0F) != 0) ||
+			(pReq->cbMessage < 6 * sizeof(DWORD)) ||
+			(pReq->cbMessage > RASPI_MAILBOX_MAX_TAG_BYTES + 3 * sizeof(DWORD)) ||
+			((pReq->cbMessage & 3) != 0) || (pMsg[0] != pReq->cbMessage) ||
+			(pMsg[1] != 0))
+		{
+			NKSetLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+
+		// Same tag rules as OALIoCtlHalMailboxProperty, then the end tag
+		nWords = pReq->cbMessage / sizeof(DWORD) - 1;
+		iWord = 2;
+		while (iWord < nWords)
+		{
+			if ((iWord + 3 > nWords) || !IsAllowedDisplayTag(pMsg[iWord]) ||
+				((pMsg[iWord + 1] & 3) != 0))
+			{
+				NKSetLastError(ERROR_INVALID_PARAMETER);
+				return FALSE;
+			}
+			nValueWords = pMsg[iWord + 1] / sizeof(DWORD);
+			if (nValueWords > nWords - iWord - 3)
+			{
+				NKSetLastError(ERROR_INVALID_PARAMETER);
+				return FALSE;
+			}
+			iWord += 3 + nValueWords;
+		}
+		if ((iWord != nWords) || (pMsg[nWords] != 0))
+		{
+			NKSetLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+
+		if (MailboxSendMail(0, MAILBOX_CHAN_PROPARM2VC, pReq->dwBusAddr >> 4) != 0)
+			return FALSE;
+		g_dwAsyncSent = pReq->dwBusAddr >> 4;
+		g_fAsyncDone = FALSE;
+		return TRUE;
+
+	case RASPI_MAILBOX_ASYNC_POLL:
+		if ((pOutBuffer == 0) || (outSize < sizeof(DWORD)) || (g_dwAsyncSent == 0))
+		{
+			NKSetLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+		// Read what has arrived, without waiting
+		while (!g_fAsyncDone && (MailboxPollMail(0, &dwRaw) == 0))
+			OALPropertyTakeReply(dwRaw, 0);
+		if (g_fAsyncDone)
+		{
+			g_dwAsyncSent = 0;
+			g_fAsyncDone = FALSE;
+			*(DWORD *)pOutBuffer = 1;
+		}
+		else
+		{
+			*(DWORD *)pOutBuffer = 0;
+		}
+		if (pOutSize != 0)
+			*pOutSize = sizeof(DWORD);
+		return TRUE;
+
+	case RASPI_MAILBOX_ASYNC_ABANDON:
+		g_dwAsyncSent = 0;
+		g_fAsyncDone = FALSE;
+		return TRUE;
+	}
+
+	NKSetLastError(ERROR_INVALID_PARAMETER);
+	return FALSE;
 }
 
 //------------------------------------------------------------------------------
@@ -718,7 +997,6 @@ BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 	volatile DWORD *pBuff = 0;
 	volatile BYTE *pMac;
 	DWORD dwBuffSize = 0;
-	DWORD dwResp = 0;
 	BYTE *pOut;
 	DWORD dwAll;
 	int rc, i;
@@ -754,7 +1032,7 @@ BOOL OALIoCtlHalGetMacAddress(UINT32 code, VOID *pInpBuffer, UINT32 inpSize,
 
 	rc = MailboxSendMail(0, MAILBOX_CHAN_PROPARM2VC, ((DWORD)pBuff) >> 4);
 	if (rc == 0)
-		rc = MailboxGetMail(0, MAILBOX_CHAN_PROPARM2VC, &dwResp);
+		rc = OALPropertyWaitReply(((DWORD)pBuff) >> 4);
 	if (rc != 0)
 		return FALSE;
 

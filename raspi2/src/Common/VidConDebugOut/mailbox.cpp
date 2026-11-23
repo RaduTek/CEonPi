@@ -120,6 +120,22 @@ int MailboxGetMail (int nMailbox, int nChannel, DWORD *pdwData)
 // WARNING:: This assumes the classic RAM mapping. If you are using the OEMRAMTable,
 // this won't work.
 //
+int MailboxPollMail (int nMailbox, DWORD *pdwRaw)
+{
+	PDWORD pdwMBBase = (PDWORD)OALPAtoVA(MAILBOX_PA_BASE + (nMailbox * MAILBOX_SIZE), FALSE);
+	PDWORD pdwMBStat = (PDWORD)((DWORD)pdwMBBase + MAILBOX_STATUS_OFF);
+	PDWORD pReadMB = (PDWORD)((DWORD)pdwMBBase + MAILBOX_READ_OFF);
+
+	if ((pdwRaw == 0) || (*pdwMBStat & MAILBOX_STAT_EMPTY))
+		return -1;
+
+	*pdwRaw = *pReadMB;
+	return 0;
+}
+
+// ---------------------------------------------------------------------------
+// 
+//
 int MailboxGetMailboxBuffer (BOOL fVirtualMem, DWORD *pdwBuff, DWORD *pdwBuffSize)
 {
 	int rc = 0;

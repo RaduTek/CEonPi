@@ -23,6 +23,9 @@
     <BspItemId>Item:CEonPi:Ethernet:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:SdHost:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:VidDebug:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:Vc4Disp:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:RaspiDisplay:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:GdiBench:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:CEonPi:IdleMon:raspi2">
     <Title>CPU Idle Monitor (demo)</Title>
@@ -44,6 +47,17 @@
     <SourceCode>
       <Title>SHUT DOWN DIALOG SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\POWEROFF</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:GdiBench:raspi2">
+    <Title>GDI benchmark (gdibench.exe)</Title>
+    <Description>Full-screen app with a desktop shortcut that times the display driver: solid fills, inverts, scrolling, text, uploads and screen readbacks, about 2 seconds each. Results are shown on screen and in the debug output (lines starting with "gdibench:"). Sets BSP_GDIBENCH=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_GDIBENCH</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>GDI BENCHMARK SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\GDIBENCH</Path>
     </SourceCode>
   </Item>
   <Item Id="Item:CEonPi:SdRoot:raspi2">
@@ -143,6 +157,30 @@
     <SourceCode>
       <Title>OAL DEBUG OUTPUT SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\OAL\OALLIB</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:Vc4Disp:raspi2">
+    <Title>Display: VideoCore IV (vc4disp)</Title>
+    <Description>Display driver (vc4disp.dll) for the BCM2835 VideoCore IV, the successor of the basic framebuffer driver. Currently the same as the basic driver: the desktop uses the framebuffer the firmware set up at boot (native resolution, 16 bpp). Choose one display driver; with none the image is headless (untested). Sets BSP_VC4DISP=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_VC4DISP</Variable>
+    <ChooseOneGroup>true</ChooseOneGroup>
+    <Location>Device Drivers\Display</Location>
+    <SourceCode>
+      <Title>VIDEOCORE IV DISPLAY DRIVER SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\DRIVERS\VC4DISP</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:RaspiDisplay:raspi2">
+    <Title>Display: basic framebuffer (raspiBasic_ddi)</Title>
+    <Description>The original display driver (raspibasic_ddi.dll, Microsoft flat sample): the desktop uses the framebuffer the firmware set up at boot. Kept as a known-good fallback for "Display: VideoCore IV (vc4disp)". Choose one display driver; with none the image is headless (untested). Sets BSP_RASPIDISPLAY=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_RASPIDISPLAY</Variable>
+    <ChooseOneGroup>true</ChooseOneGroup>
+    <Location>Device Drivers\Display</Location>
+    <SourceCode>
+      <Title>BASIC DISPLAY DRIVER SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\DRIVERS\RASPIBASIC_DDI</Path>
     </SourceCode>
   </Item>
 </CatalogFile>

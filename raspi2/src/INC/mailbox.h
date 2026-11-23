@@ -85,6 +85,10 @@ int MailboxGetMail (int nMailbox, int nChannel, DWORD *pdwData);
 
 int MailboxGetMailboxBuffer (BOOL fVirtualMem, DWORD *pdwBuff, DWORD *pdwBuffSize);
 
+// Non-blocking read of mailbox nMailbox: returns 0 and the raw message (data
+// in bits 31..4, channel in bits 3..0) if one is waiting, -1 if it is empty.
+int MailboxPollMail (int nMailbox, DWORD *pdwRaw);
+
 #if __cplusplus
 }
 #endif

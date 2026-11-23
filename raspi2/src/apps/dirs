@@ -6,4 +6,5 @@ DIRS= \
     poweroff \
     audiotest \
     voltray \
+    gdibench \
 

@@ -32,8 +32,9 @@ extern "C" {
 #define SYSINTR_USBHOST      (SYSINTR_FIRMWARE+1)
 #define SYSINTR_SDHC         (SYSINTR_FIRMWARE+2)   // Arasan eMMC, GPU IRQ 62
 #define SYSINTR_AUDIO        (SYSINTR_FIRMWARE+3)   // PWM audio DMA channel, GPU IRQ 20
+#define SYSINTR_DISPDMA      (SYSINTR_FIRMWARE+4)   // display DMA channel, GPU IRQ 21
 
-#define SYSINTR_ENDOFSTATIC  (SYSINTR_FIRMWARE+3)
+#define SYSINTR_ENDOFSTATIC  (SYSINTR_FIRMWARE+4)
 
 // DMA channel used by the PWM audio driver (pwmaudio.dll). Fixed because the
 // OAL routes its interrupt (GPU IRQ 16 + channel) to SYSINTR_AUDIO. Channel 4
@@ -41,6 +42,12 @@ extern "C" {
 // firmware gives Linux. Change RASPI_IRQR1_AUDIODMA together with it.
 #define AUDIO_DMA_CHANNEL    4
 #define RASPI_IRQR1_AUDIODMA (1 << (16 + AUDIO_DMA_CHANNEL))
+
+// DMA channel used by the display driver (vc4disp.dll) for screen-to-screen
+// copies and fills, routed to SYSINTR_DISPDMA. Channel 5 is a full channel
+// in the same ARM-usable mask; the driver checks the firmware's mask at load.
+#define DISP_DMA_CHANNEL     5
+#define RASPI_IRQR1_DISPDMA  (1 << (16 + DISP_DMA_CHANNEL))
 
 
 // Discovered in the Raspberry Pi forums...
