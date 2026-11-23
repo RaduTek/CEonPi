@@ -17,6 +17,7 @@
 #include <nkintr.h>
 #include "vidconsole.h"
 #include "video.h"
+#include "bootsplash.h"
 
 // Uncommend the below equate to send the pre-kitl debug output to the display.
 // This can be set with the build environment var BSP_USEVIDASDEBUGPORT=1
@@ -61,6 +62,9 @@ volatile PDWORD pGPIOClrReg0 = 0;
 void OEMInitDebugSerial(void)
 {
 	DWORD dwSurf;
+#ifndef VIDEO_DEBUG_OUT
+	int nWidth, nHeight;
+#endif
 
 	// Map in the SOC registers.  We don't do this in the
 	g_p2835Regs = (PBYTE)NKCreateStaticMapping((DWORD)PERIPHERAL_PA_BASE>>8,PERIPHERAL_PA_SIZE);
@@ -95,14 +99,17 @@ void OEMInitDebugSerial(void)
 		// default is to use the serial port for debug.
 		pWriteCharFunc = &VidCON_WriteDebugByteExtern;
 
-		Debug (L"Debug Out Redirected to screen... Res: %dx%d %dbpp\r\n\r\n", VID_WIDTH, VID_HEIGHT, VID_BITSPP);
+		Debug (L"Debug Out Redirected to screen...\r\n\r\n");
 	}
 #else  //VIDEO_DEBUG_OUT
 
-	// Initialize the video system
-	if (InitVideoSystem (VID_WIDTH, VID_HEIGHT, VID_BITSPP, &dwSurf, TRUE) == 0)
+	// Initialize the video system at the display's own resolution, then
+	// draw the boot splash (logo + animated loading bar).
+	GetBootDisplaySize (TRUE, &nWidth, &nHeight);
+	if (InitVideoSystem (nWidth, nHeight, VID_BITSPP, &dwSurf, TRUE) == 0)
 	{
 		Debug (L"Video init good. \r\n");
+		BootSplash_Init (dwSurf, FALSE, NULL);
 	}
 	else
 		Debug (L"Video init failed\r\n");

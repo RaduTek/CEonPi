@@ -19,6 +19,7 @@
 #include <image_cfg.h>
 #include "Video.h"
 #include "VidConsole.h"
+#include "bootsplash.h"
 #include "Debugfuncs.h"
 
 extern "C" ROMHDR * volatile const pTOC;
@@ -28,19 +29,18 @@ extern "C" ROMHDR * volatile const pTOC;
 //
 #if VID_BITSPP == 16
 //#define FORECOLOR  0xffff //White
-#define FORECOLOR  0xffc0 //Yellow
+//#define FORECOLOR  0xffc0 //Yellow
+#define FORECOLOR  0xc618 //Light gray (RGB565 of 0xC0C0C0)
 #define FILLCOLOR  0x0000 //White
 
 #elif VID_BITSPP == 24
-#define FORECOLOR  0x0000
-#define FILLCOLOR  0x00ffffff
+#define FORECOLOR  0x00c0c0c0 //Light gray
+#define FILLCOLOR  0x00000000 //Black
 
 #else
-#define FORECOLOR  0x0000
-#define FILLCOLOR  0x00ffffff
+#define FORECOLOR  0x00c0c0c0
+#define FILLCOLOR  0x00000000
 #endif
-
-#define CON_COLS     120
 
 #define TABSPACE							8		// number of spaces for a TAB
 
@@ -84,11 +84,23 @@ int VidCON_InitDebugSerial (BOOL fVirtualMem)
 	PBITMAPFILEHEADER pbmfh;
 	PBITMAPINFOHEADER pbmih;
 	BITMAPINFOHEADER bmihFont;
-	
+	PSURFINFO pSurf;
+	int nWidth, nHeight;
+	DWORD dwTextTop = 0;
+
 	Debug (TEXT("VidCON_InitDebugSerial++\r\n"));
 
-	// Initialize the video system
-	InitVideoSystem (VID_WIDTH, VID_HEIGHT, VID_BITSPP, &stConData.hVidFrame, fVirtualMem);
+	// Initialize the video system at the display's own resolution
+	GetBootDisplaySize (fVirtualMem, &nWidth, &nHeight);
+	if (InitVideoSystem (nWidth, nHeight, VID_BITSPP, &stConData.hVidFrame, fVirtualMem) != 0)
+	{
+		Debug (TEXT("VidCON_InitDebugSerial-- no frame buffer\r\n"));
+		return -1;
+	}
+	pSurf = (PSURFINFO)stConData.hVidFrame;
+
+	// Logo in the top-left corner; the console scrolls below it.
+	BootSplash_Init (stConData.hVidFrame, TRUE, &dwTextTop);
 
 	// Load the font file
 	Debug (TEXT("Calling BinFindFileData...\r\n"));
@@ -143,10 +155,14 @@ int VidCON_InitDebugSerial (BOOL fVirtualMem)
 		// The values are hard coded and are derived from the font image I created.
 		stConData.bCharWidth = 8;
 		stConData.bCharHeight = 16;
+		// Full screen width, whole character rows from below the logo down.
+		if (dwTextTop + stConData.bCharHeight > (DWORD)pSurf->nHeight)
+			dwTextTop = 0;
 		stConData.dwConLeft = 0;
-		stConData.dwConTop = 0;
-		stConData.dwConRight = CON_COLS * stConData.bCharWidth;
-		stConData.dwConBottom = VID_HEIGHT;
+		stConData.dwConTop = dwTextTop;
+		stConData.dwConRight = (pSurf->nWidth / stConData.bCharWidth) * stConData.bCharWidth;
+		stConData.dwConBottom = dwTextTop +
+			(((DWORD)pSurf->nHeight - dwTextTop) / stConData.bCharHeight) * stConData.bCharHeight;
 
 		stConData.hFont =(HSURF)&siFont;
 
@@ -175,6 +191,9 @@ int VidCON_DisableDebugSerial (BOOL fVirtualMem)
 {
 	// Disable video console output
 	stConData.wEnable=0;
+
+	// Stop the boot splash loading bar animation (timer ISR)
+	BootSplash_Stop();
 
 	return 0;
 }
@@ -214,7 +233,9 @@ int UpdateCursor (PCONDATASTRUCT pstCon, DWORD dX, DWORD dY)
 	{
 		pstCon->dwCurX += (pstCon->bCharWidth * dX);
 
-		if (pstCon->dwCurX > pstCon->dwConRight)
+		// Wrap when the next character would not fit (the console may now
+		// end at the right edge of the frame buffer).
+		if (pstCon->dwCurX + pstCon->bCharWidth > pstCon->dwConRight)
 		{
 			pstCon->dwCurX = pstCon->dwConLeft;
 			dY++;

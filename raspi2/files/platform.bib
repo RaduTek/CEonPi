@@ -173,6 +173,11 @@ FILES
 ;   Name        Path                                                                            Memory Flags
 ;   ----------  ------------------------------------------------------------------------------    -----------
     font.bmp    $(_FLATRELEASEDIR)\BootConsoleFont.8.bmp		  NK	U
+; Boot splash (src\Common\VidConDebugOut\bootsplash.cpp). Must stay U (uncompressed).
+    splash.bmp  $(_FLATRELEASEDIR)\splash_logo.24.bmp		  NK	U
+    splashsm.bmp $(_FLATRELEASEDIR)\windowsce_rect.bmp		  NK	U
+    ldbar.bmp   $(_FLATRELEASEDIR)\loading_bar.bmp		  NK	U
+    ldfill.bmp  $(_FLATRELEASEDIR)\loading_bar_fill.bmp		  NK	U
 IF BSP_IDLEMON
     idlemon.lnk $(_FLATRELEASEDIR)\idlemon.lnk		  NK	SH
 ENDIF BSP_IDLEMON

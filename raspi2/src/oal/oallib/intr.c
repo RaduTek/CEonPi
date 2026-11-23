@@ -15,6 +15,7 @@
 #include <bsp.h>
 #include <bsp_cfg.h>
 #include <image_cfg.h>
+#include <bootsplash.h>
 
 void ResetSchedulerTimer(UINT32 countsPerMSec);
 
@@ -446,6 +447,10 @@ VidCON_WriteDebugByteExtern('~');
 
 			//update kernel tick
 			CurMSec = CurMSec + 1;
+
+			// Boot splash loading bar (bootsplash.cpp). Returns at once
+			// unless the animation runs (until the display driver starts).
+			BootSplash_Tick(CurMSec);
 
 			// Reschedule?
 			if ((int)(CurMSec - dwReschedTime) >= 0)

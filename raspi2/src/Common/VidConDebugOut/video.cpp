@@ -188,13 +188,13 @@ int InitVideoSystem(int nWidth, int nHeight, int nBitsPerPixel, HSURF *phVidFram
 			BltPtrs.pSetBlt = &VidSet_24;
 			BltPtrs.pCopyBlt = &VidCopy_24;
 			BltPtrs.pTxtBlt = &VidTxtBlt_24;
-			dwFill = 0x00ff0000;
+			dwFill = 0;		// black (boot splash background)
 			break;
 		case 16:
 			BltPtrs.pSetBlt = &VidSet_16;
 			BltPtrs.pCopyBlt = &VidCopy_16;
 			BltPtrs.pTxtBlt = &VidTxtBlt_16;
-			dwFill = 0x003f;
+			dwFill = 0;		// black (boot splash background)
 			break;
 		default:
 			Debug (TEXT("***** ERROR ***** Unsupported pixel depth %d (0x%x)\r\n"), g_vbInfo.nBitsPerPixel, g_vbInfo.nBitsPerPixel);
@@ -212,6 +212,73 @@ int InitVideoSystem(int nWidth, int nHeight, int nBitsPerPixel, HSURF *phVidFram
 
 	//Debug (TEXT("InitVideoSystem-- rc=%d\r\n"), rc);
 	return rc;
+}
+
+//----------------------------------------------------------------------------------
+// GetBootDisplaySize - Asks the VideoCore for the physical display size
+// (property tag 0x00040003, "get physical display width/height": the HDMI mode
+// from EDID or config.txt). Falls back to VID_WIDTH x VID_HEIGHT.
+//
+// This runs from OEMInitDebugSerial, before OEMInit has set up the cache
+// globals OEMCacheRangeFlush needs, so OALMailboxPropertyTag (ioctl.c) cannot
+// be used. Instead the request is built through the uncached view of RAM
+// (0xA0000000 + pa) and handed to the VideoCore as the uncached bus alias
+// (0xC0000000 + pa), so no cache maintenance is needed. Offset 0x2800 keeps
+// it off the cache lines of the 0x2000 buffer the other mailbox users reach
+// through the cached view.
+//
+#define VIDPROP_BUFF_PA				0x00002800
+#define VIDPROP_BUS_UNCACHED		0xC0000000
+#define VIDPROP_TAG_GET_PHYS_WH		0x00040003
+#define VIDPROP_RESPONSE_OK			0x80000000
+#define VIDPROP_MAX_DIM				4096
+
+void GetBootDisplaySize(BOOL fVirtualMem, int *pnWidth, int *pnHeight)
+{
+	volatile DWORD *pBuff;
+	DWORD dwResp = 0;
+	DWORD dwW = 0, dwH = 0;
+	int rc;
+
+	if (fVirtualMem)
+		pBuff = (volatile DWORD *)(0xA0000000 | VIDPROP_BUFF_PA);
+	else
+		pBuff = (volatile DWORD *)VIDPROP_BUFF_PA;
+
+	// [0] buffer size, [1] request code, [2] tag, [3] value size,
+	// [4] tag request code, [5] width, [6] height, [7] end tag
+	pBuff[0] = 8 * sizeof(DWORD);
+	pBuff[1] = 0;
+	pBuff[2] = VIDPROP_TAG_GET_PHYS_WH;
+	pBuff[3] = 2 * sizeof(DWORD);
+	pBuff[4] = 0;
+	pBuff[5] = 0;
+	pBuff[6] = 0;
+	pBuff[7] = 0;
+
+	rc = MailboxSendMail (0, MAILBOX_CHAN_PROPARM2VC, (VIDPROP_BUS_UNCACHED | VIDPROP_BUFF_PA) >> 4);
+	if (rc == 0)
+		rc = MailboxGetMail (0, MAILBOX_CHAN_PROPARM2VC, &dwResp);
+
+	if ((rc == 0) && (pBuff[1] == VIDPROP_RESPONSE_OK) && (pBuff[4] & VIDPROP_RESPONSE_OK))
+	{
+		dwW = pBuff[5];
+		dwH = pBuff[6];
+	}
+
+	if ((dwW == 0) || (dwH == 0) || (dwW > VIDPROP_MAX_DIM) || (dwH > VIDPROP_MAX_DIM))
+	{
+		*pnWidth = VID_WIDTH;
+		*pnHeight = VID_HEIGHT;
+		Debug (TEXT("Video: size query failed (rc %d resp %x w %d h %d), using %dx%d\r\n"),
+		       rc, pBuff[1], dwW, dwH, *pnWidth, *pnHeight);
+	}
+	else
+	{
+		*pnWidth = (int)dwW;
+		*pnHeight = (int)dwH;
+		Debug (TEXT("Video: firmware display %dx%d\r\n"), *pnWidth, *pnHeight);
+	}
 }
 // ---------------------------------------------------------------------------
 // GetVideoSettings 

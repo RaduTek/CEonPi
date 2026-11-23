@@ -84,6 +84,17 @@ controller so keyboards, mice and USB Ethernet work.
   `gpu_mem=16` does not boot with only `start.elf`/`fixup.dat` on the card (LED 4 flashes; probably
   needs the cut-down `start_cd.elf`/`fixup_cd.dat`, untested).
 - Status LED is GPIO16, which is not the Zero's activity LED.
+- Boot splash and display resolution (2026-11-23, verified): `OEMInitDebugSerial` asks the firmware
+  for the physical display size (property tag `0x00040003`, `GetBootDisplaySize` in
+  `src\Common\VidConDebugOut\video.cpp`) and allocates the framebuffer at that size. The query runs
+  before the cache globals exist, so it uses the uncached RAM view `0xA0002800` and bus alias
+  `0xC0002800` with no cache maintenance, and that works. `VID_WIDTH`/`VID_HEIGHT` are only the fallback. The
+  desktop (`raspiBasic_ddi`) takes its mode from `GetVideoSettings`, so it runs at native resolution
+  (verified on 1920x1080 and 1680x1050 monitors). `bootsplash.cpp` draws the splash: centred logo
+  `splash.bmp` + marquee bar (`ldbar.bmp`/`ldfill.bmp`, animated from the Timer 3 tick ISR, stopped
+  by `ddi.c` `SetMode`); in on-screen log mode (KITL / `BSP_USEVIDASDEBUGPORT=1`) only `splashsm.bmp`
+  top-left, with the full-width console scrolling below it. The BMPs are uncompressed (`U`) FILES
+  entries in `platform.bib`.
 
 ## USB driver: current state
 - **No driver source exists in this repo.** `platform.reg` references `dwchci.dll`,

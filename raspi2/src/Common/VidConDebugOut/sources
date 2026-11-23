@@ -33,6 +33,7 @@ SOURCES =    \
 	mailbox.cpp \
 	video.cpp \
 	vidconsole.cpp \
+	bootsplash.cpp \
 
 FILE_VIEW_INCLUDES_FOLDER= \
     BinFileSystem.h \

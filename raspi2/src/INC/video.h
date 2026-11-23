@@ -38,6 +38,12 @@ typedef struct {
 int InitVideoSystem(int nWidth, int nHeight, int nBitsPerPixel, HSURF *phVidFrame, BOOL fVirtualMem);
 
 //----------------------------------------------------------------------------------
+// GetBootDisplaySize - Display size from the VideoCore firmware, falling back
+// to VID_WIDTH x VID_HEIGHT (image_cfg.h)
+//
+void GetBootDisplaySize(BOOL fVirtualMem, int *pnWidth, int *pnHeight);
+
+//----------------------------------------------------------------------------------
 // GetVideoSettings - Returns the parameters of the video frame buffer
 //
 BOOL GetVideoSettings (PMYDISPLAYSETTTNGS pSettings);
