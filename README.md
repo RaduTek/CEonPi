@@ -41,6 +41,8 @@ This is very easy. An SD card of any size is needed, formatted to a single FAT p
     config.txt
     kernel.img
 
+If SD card persistence is enabled, `Windows`, `Program Files` and other folders will also be part of the `sdcard` folder. The SD card becomes the root file system, and the files above will be visible in My Device. To fix this, set the system FAT file attribute to all the system boot files.
+
 The firmware files and `config.txt` live in [raspi2/files/sdboot](raspi2/files/sdboot); the firmware comes from the official Raspberry Pi firmware repository ([raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)) and is redistributed under its licence (`LICENCE.broadcom`). I was a little surprised that the latest work just fine, I expected I'd have to dig up the old boot files from 2013.
 
 The `config.txt` file is quite short:
@@ -58,6 +60,21 @@ None of these config lines are needed to boot the kernel, but do come in handy:
 needed so the UART works properly at 115200 baud (future investigation into configuring UART clock dividers for 115200 @ 48 MHz needed)
 - `gpu_mem=32` reduce amount of memory allocated to the GPU to free up more memory for general use - may be removed or changed later depending on how the Video driver evolves
 
+### Composite (TV) output
+
+To use the composite TV output instead of HDMI, replace the first two lines of `config.txt` with:
+
+    hdmi_ignore_hotplug=1
+    sdtv_mode=2
+    sdtv_aspect=1
+
+- `hdmi_ignore_hotplug=1` uses composite even if an HDMI display is connected. `hdmi_force_hotplug=1` must be removed, as it keeps the output on HDMI
+- `sdtv_mode` selects the TV standard: `0` NTSC, `1` Japanese NTSC, `2` PAL, `3` Brazilian PAL
+- `sdtv_aspect` selects the aspect ratio: `1` 4:3, `3` 16:9
+- `disable_overscan=1` is left out, so the firmware's default border keeps the edges of the desktop visible on a TV. Put it back if your TV shows the whole picture
+
+No changes to the CE image are needed: the BSP asks the firmware for the display size at boot, so the desktop runs at the TV resolution. The composite signal comes out of the yellow RCA jack on the Pi 1 Model B, the 4-pole 3.5 mm jack on the B+/A+, and the unpopulated "TV" pads on the Pi Zero.
+
 `kernel.img` is the built CE kernel together with it's ROM file system. It is a copy of `NK.nb0` made by `PostMakeimg.bat` (through `mksdcard.js`); `NK.nb0` itself stays in the release directory. With the "SD card as root file system" catalog item, the `sdcard` folder also holds the desktop shortcuts and startup folders (see [docs/sdroot.md](docs/sdroot.md)). The image is linked at offset `0x80008000` and is loaded in the same way as the Linux kernel.
 
 ## Board support
@@ -73,14 +90,18 @@ Most of the work was done on the Pi Zero W. The Ethernet driver was developed an
 
 ## Catalog items
 
-The BSP contains a bunch of optional add-ins that can be enabled using the Catalog Items View:
+The BSP contains a bunch of optional add-ins that can be enabled using the Catalog Items View. Each one sets a `BSP_` environment variable (shown in brackets):
 
 - **Applications**
-    - **CPU Idle Monitor (demo)** - shows the % of idle CPU time
-    - **Shut Down dialog (poweroff.exe)** - convenient way of shutting down or restarting the OS
+    - **CPU Idle Monitor (demo)** (`BSP_IDLEMON`) - shows CPU load, the % of idle CPU time and `GetIdleTime()`, with a desktop shortcut
+    - **Shut Down dialog (poweroff.exe)** (`BSP_POWEROFF`) - convenient way of shutting down or restarting the OS, with a desktop shortcut
+    - **Audio test (audiotest.exe)** (`BSP_AUDIOTEST`) - plays left/right test tones in several formats and reports timing; `audiotest file.wav` plays a WAV file <br> Needs the Waveform Audio catalog item (`SYSGEN_AUDIO`) and an audio driver
+    - **Volume tray icon (voltray.exe)** (`BSP_VOLTRAY`) - speaker icon in the taskbar with a volume slider and a Mute box, started from the Startup folder <br> Needs Waveform Audio (`SYSGEN_AUDIO`), an audio driver and a shell with a taskbar
+- **Device Drivers\Audio**
+    - **Analog audio (Pi 1 3.5 mm jack)** (`BSP_AUDIO`) - PWM audio driver for the 3.5 mm jack of the Pi 1 (the Pi Zero has no jack), see [docs/audio.md](docs/audio.md) <br> Needs the Waveform Audio catalog item (`SYSGEN_AUDIO`)
 - **Storage**
-    - **Load optional modules from the SD card** - offload some binaries (IE7, network tools) to the SD card to reduce kernel.img size <br> Depends on the "SD card as root file system" item
-    - **SD card as root file system** - mounts the SD card at `\` instead of `\Storage Card`, useful for persistence
+    - **SD card as root file system** (`BSP_SDROOT`) - mounts the SD card at `\` instead of `\Storage Card`, so files persist across reboots (and the registry too with the "ROM-only File System" item), see [docs/sdroot.md](docs/sdroot.md) <br> Needs the SD host driver
+    - **Load optional modules from the SD card** (`BSP_SDOFFLOAD`) - leaves some binaries (IE7, network tools) out of kernel.img and loads them from the SD card instead, to reduce kernel.img size and RAM use <br> Depends on the "SD card as root file system" item
 
 ## Hardware driver support
 
@@ -92,7 +113,7 @@ These are hardware features that are functional
 |-|-|-|
 | UART | Basic | Used for KITL debugger connection with Visual Studio |
 | [Audio](docs/audio.md) | Complete | Support PWM audio output on the Pi 1 Model B with dithering enhancements for quality |
-| Display | Basic | Fixed resolution, no acceleration whatsoever |
+| Display | Basic | HDMI or composite TV output at the native display resolution (from the firmware), no acceleration whatsoever |
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
 | [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
 | [USB Ethernet](docs/ethernet.md) | Working | SMSC LAN9512 on the Pi 1 Model B: DHCP, IPv4/IPv6, firmware MAC address. ~5.6 MB/s receive, ~3.8 MB/s send (Release build) |
@@ -112,7 +133,7 @@ Things I plan on getting working, in order of priority
 | Feature | Comments |
 |-|-|
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |
-| Better Display | Support Composite output, no hardcoded resolution in CE image |
+| Better Display | Hardware acceleration, resolution changes at runtime |
 | SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |
 | USB Function | Useful only on the Pi Zero, let the Pi be connected as a USB device to a computer<br>(for ActiveSync or Mass Storage) |
 | USB Isochronous mode | Needed for USB audio and video class devices<br>CE only includes a USB audio driver |
