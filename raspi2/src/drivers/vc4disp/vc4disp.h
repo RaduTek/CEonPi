@@ -15,9 +15,10 @@
 //  File:  vc4disp.h
 //
 //  VideoCore IV display driver for the BCM2835 (CEonPi). Derived from the
-//  Microsoft HALFlat sample through raspiBasic_ddi. D0 (this version): same
-//  behaviour as raspiBasic_ddi, the framebuffer and its single mode still come
-//  from the OAL through IOCTL_HAL_DDI.
+//  Microsoft HALFlat sample through raspiBasic_ddi. The framebuffer and its
+//  single mode still come from the OAL through IOCTL_HAL_DDI. D1: GDI draws
+//  through the cached view of the framebuffer and the driver writes the
+//  touched rows back after every operation (registry CachedFrameBuffer).
 //
 #ifndef __VC4DISP_H
 #define __VC4DISP_H
@@ -26,13 +27,25 @@
 
 #define GPE_ZONE_PDD        DEBUGZONE(14)
 
+// Registry key used when GWES passes no instance key to DisplayInit
+#define VC4DISP_REG_KEY             L"Drivers\\Display\\vc4disp\\Config"
+
+// DWORD: 1 (default) draw through the cached framebuffer view, 0 uncached
+#define VC4DISP_REG_CACHEDFB        L"CachedFrameBuffer"
+
+// CE ARM static mappings: uncached view = cached view + 0x20000000
+#define VC4DISP_STATIC_CACHED       0x80000000
+#define VC4DISP_STATIC_UNCACHED     0xA0000000
+#define VC4DISP_STATIC_MASK         0xE0000000
+#define VC4DISP_STATIC_UNCACHED_OFS 0x20000000
+
 //------------------------------------------------------------------------------
 
 class Vc4GPE : public GPE
 {
 
 public:
-    Vc4GPE();
+    Vc4GPE(BOOL fCachedFb);
     virtual ~Vc4GPE();
 
     virtual int InVBlank();
@@ -57,6 +70,10 @@ private:
     // Actual mode info (width, height, bpp, frequency, and format)
     GPEMode m_gpeMode;
 
+    // Framebuffer: TRUE when drawing goes through the cached view, so every
+    // write to the primary surface must be followed by FlushRect
+    BOOL   m_fCachedFb;
+
     // Software cursor
     BOOL   m_cursorDisabled;
     BOOL   m_cursorVisible;
@@ -70,6 +87,7 @@ private:
 
     // Helper functions
     UINT8* QueryModeInfo(int modeNumber);
+    VOID FlushRect(const RECTL *pRect);
     VOID CursorOn();
     VOID CursorOff();
     SCODE WrappedEmulatedLine(GPELineParms*);

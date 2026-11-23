@@ -154,6 +154,13 @@ IF BSP_POWEROFF
     poweroff.exe       $(_FLATRELEASEDIR)\poweroff.exe                 NK
 ENDIF BSP_POWEROFF
 
+; GDI benchmark (src\apps\gdibench): times the display driver's fill, scroll,
+; text and blit paths. Optional: set BSP_GDIBENCH=1 (catalog item "GDI
+; benchmark (gdibench.exe)"). platform.dat puts a shortcut on the desktop.
+IF BSP_GDIBENCH
+    gdibench.exe       $(_FLATRELEASEDIR)\gdibench.exe                 NK
+ENDIF BSP_GDIBENCH
+
 ; Audio test (src\apps\audiotest): waveOut tones and PlaySound. Optional:
 ; set BSP_AUDIOTEST=1 (catalog item "Audio test (audiotest.exe)").
 ; platform.dat puts a shortcut on the desktop.
@@ -239,6 +246,9 @@ ENDIF BSP_IDLEMON
 IF BSP_POWEROFF
     poweroff.lnk $(_FLATRELEASEDIR)\poweroff.lnk		  NK	SH
 ENDIF BSP_POWEROFF
+IF BSP_GDIBENCH
+    gdibench.lnk $(_FLATRELEASEDIR)\gdibench.lnk		  NK	SH
+ENDIF BSP_GDIBENCH
 ; @CESYSGEN IF CE_MODULES_WAVEAPI
 IF BSP_NOAUDIO !
 IF BSP_AUDIOTEST

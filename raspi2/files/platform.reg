@@ -36,8 +36,12 @@ ENDIF BSP_NOEXAMPLEREG !
 IF BSP_NODISPLAY !
 
 IF BSP_VC4DISP
+; CachedFrameBuffer: 1 = draw through the cached view of the framebuffer and
+; write the touched rows back after each operation (fast screen reads:
+; scrolling, window moves, cursor); 0 = draw uncached, as raspiBasic_ddi does.
 [HKEY_LOCAL_MACHINE\Drivers\Display\vc4disp\Config]
     "DisplayDll"="vc4disp.dll"
+    "CachedFrameBuffer"=dword:1
 
 [HKEY_LOCAL_MACHINE\System\GDI\Drivers]
     "Display"="vc4disp.dll"

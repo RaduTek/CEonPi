@@ -24,6 +24,11 @@ IF BSP_POWEROFF
 Directory("\Windows\Desktop"):-File("Shut Down.lnk","\Windows\poweroff.lnk")
 ENDIF BSP_POWEROFF
 
+; GDI benchmark: desktop shortcut (optional, BSP_GDIBENCH=1)
+IF BSP_GDIBENCH
+Directory("\Windows\Desktop"):-File("GDI Benchmark.lnk","\Windows\gdibench.lnk")
+ENDIF BSP_GDIBENCH
+
 ; Audio test: desktop shortcut (optional, BSP_AUDIOTEST=1)
 IF BSP_NOAUDIO !
 IF BSP_AUDIOTEST

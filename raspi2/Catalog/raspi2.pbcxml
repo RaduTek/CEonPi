@@ -25,6 +25,7 @@
     <BspItemId>Item:CEonPi:VidDebug:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:Vc4Disp:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:RaspiDisplay:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:GdiBench:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:CEonPi:IdleMon:raspi2">
     <Title>CPU Idle Monitor (demo)</Title>
@@ -46,6 +47,17 @@
     <SourceCode>
       <Title>SHUT DOWN DIALOG SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\POWEROFF</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:GdiBench:raspi2">
+    <Title>GDI benchmark (gdibench.exe)</Title>
+    <Description>Full-screen app with a desktop shortcut that times the display driver: solid fills, inverts, scrolling, text, uploads and screen readbacks, about 2 seconds each. Results are shown on screen and in the debug output (lines starting with "gdibench:"). Sets BSP_GDIBENCH=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_GDIBENCH</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>GDI BENCHMARK SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\GDIBENCH</Path>
     </SourceCode>
   </Item>
   <Item Id="Item:CEonPi:SdRoot:raspi2">

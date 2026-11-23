@@ -317,6 +317,18 @@ ARM1176.
 - **D0 done and verified (2026-11-23, Pi 1 Model B):** vc4disp loads and boots to the desktop; log
   line `vc4disp: mode 1 1920x1080 16 bpp stride 3840 fb 0xae7fe000` (GWES passes the OAL's `modeId`
   1, which the OAL ignores; `fb` is the uncached `0xA...` view as expected).
+- **D1 done and verified (2026-11-23, Pi 1 Model B):** GDI draws through the cached static view
+  (`0x8...`, the OAL address table maps all 512 MB) and `FlushRect` cleans the D-cache over the touched
+  rows after each blit (`BltComplete`, dst rect), line (bounds + 1 px) and cursor draw/erase. Registry
+  `CachedFrameBuffer` (default 1, 0 = old uncached). UI renders correctly. `gdibench.exe`
+  (`src\apps\gdibench`, `BSP_GDIBENCH`) at 1920x1080x16, uncached -> cached, kpix/s: Fill 21430 ->
+  46071, Invert 1635 -> 2146, Scroll 40135 -> 80575, Text 5022 -> 5609, Upload 36714 -> 43319,
+  Readback 21779 -> 40546.
+- GPE emulation fast paths at 16 bpp (`public\common\oak\drivers\display\emulrotate\ebbltsel.cpp`
+  `EmulatedBltSelect16`): BLACKNESS/WHITENESS, solid PATCOPY, text (0xAAF0), same-format SRCCOPY/SRCAND/
+  SRCPAINT/SRCINVERT, 1/4 bpp -> 16 copies. Everything else (DSTINVERT, format conversion `pConvert`
+  e.g. 24/32 bpp DIB -> screen, stretch, transparent, alpha) falls to the generic per-pixel path:
+  ~2 Mpix/s (the Invert result), i.e. ~1 s per full 1080p screen.
 - Plan: D0 copy + clean-up (no behaviour change);
   D1 speed up drawing (GDI reads from uncached memory: cached shadow surface or write-combined
   mapping); D2 driver-owned mode set through a generic mailbox property-tag IOCTL (16/32 bpp, blanking

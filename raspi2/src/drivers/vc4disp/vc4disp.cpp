@@ -21,8 +21,17 @@
 //  (src\Common\VidConDebugOut\video.cpp) and describes it as the single mode
 //  returned by IOCTL_HAL_DDI (src\oal\oallib\ddi.c). The phFrameBase field
 //  carries the kernel's uncached static virtual address (0xA0000000 | pa),
-//  not a physical address, so it is used as is. All drawing is GPE software
-//  emulation with a software cursor.
+//  not a physical address. All drawing is GPE software emulation with a
+//  software cursor.
+//
+//  D1: GDI reads the screen back for scrolling, window moves, ROPs, alpha and
+//  the cursor, and uncached reads are very slow on the ARM1176. So the driver
+//  draws through the cached static view (0x80000000 | pa, the OAL address
+//  table maps all RAM) and cleans the D-cache over the touched rows after
+//  every blit, line and cursor update, so the VideoCore scans out current
+//  pixels. Nothing else writes the framebuffer once SetMode has stopped the
+//  OAL console, so the cached copy never goes stale. Registry value
+//  CachedFrameBuffer=0 restores the old uncached drawing (for comparison).
 //
 //  Changes from raspiBasic_ddi: no MmUnmapIoSpace on a buffer that was never
 //  mapped, the mode-info buffer is no longer leaked by SetMode and is zeroed
@@ -66,11 +75,33 @@ BOOL APIENTRY GPEEnableDriver(
 //
 BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
 {
+    HKEY hKey;
+    DWORD dwCachedFb = 1, dwType, dwSize, dwValue;
+
     DEBUGMSG(GPE_ZONE_PDD, (
         L"+DisplayInit(%s, %d)\r\n", pszInstance, monitors
     ));
 
-    g_pGPE = new Vc4GPE;
+    // Driver settings from the instance key GWES passes (the display
+    // candidate), or our own key
+    if (RegOpenKeyEx(
+            HKEY_LOCAL_MACHINE,
+            (pszInstance != NULL) ? pszInstance : VC4DISP_REG_KEY,
+            0, 0, &hKey
+        ) == ERROR_SUCCESS
+    ) {
+        dwSize = sizeof(dwValue);
+        if (RegQueryValueEx(
+                hKey, VC4DISP_REG_CACHEDFB, NULL, &dwType, (LPBYTE)&dwValue,
+                &dwSize
+            ) == ERROR_SUCCESS && dwType == REG_DWORD
+        ) {
+            dwCachedFb = dwValue;
+        }
+        RegCloseKey(hKey);
+    }
+
+    g_pGPE = new Vc4GPE(dwCachedFb != 0);
 
     DEBUGMSG(GPE_ZONE_PDD, (L"-DisplayInit(rc = %d)\r\n", g_pGPE != NULL));
     return (g_pGPE != NULL);
@@ -116,10 +147,11 @@ GPE* GetGPE()
 //
 //  Constructor
 //
-Vc4GPE::Vc4GPE()
+Vc4GPE::Vc4GPE(BOOL fCachedFb)
 {
     m_pPrimarySurface = NULL;
     memset(&m_gpeMode, 0, sizeof(m_gpeMode));
+    m_fCachedFb = fCachedFb;
     m_cursorVisible = FALSE;
     m_cursorDisabled = TRUE;
     m_cursorForcedOff = FALSE;
@@ -248,7 +280,7 @@ SCODE Vc4GPE::SetMode(int modeNumber, HPALETTE *pPalette)
     SCODE sc = S_OK;
     UINT8 *pBuffer = NULL;
     DDHAL_MODE_INFO *pInfo;
-    ULONG commands[2], *pColors;
+    ULONG commands[2], *pColors, ulFrame;
 
     pBuffer = QueryModeInfo(modeNumber);
     if (pBuffer == NULL) {
@@ -285,14 +317,30 @@ SCODE Vc4GPE::SetMode(int modeNumber, HPALETTE *pPalette)
     m_nScreenHeight = m_pMode->height;
 
     // phFrameBase holds the OAL's uncached virtual address (see file header)
-    if (pInfo->phFrameBase == 0) {
+    ulFrame = (ULONG)pInfo->phFrameBase;
+    if (ulFrame == 0) {
         DEBUGMSG(GPE_ZONE_ERROR, (L"Vc4GPE::SetMode: no frame buffer\r\n"));
         sc = E_FAIL;
         goto cleanUp;
     }
 
+    // Draw through the cached view of the same memory when asked to. Only
+    // the static uncached range has a known cached twin.
+    if (m_fCachedFb) {
+        if ((ulFrame & VC4DISP_STATIC_MASK) == VC4DISP_STATIC_UNCACHED) {
+            ulFrame -= VC4DISP_STATIC_UNCACHED_OFS;
+            // Drop any lines a previous mode left in the cache
+            CacheRangeFlush(NULL, 0, CACHE_SYNC_DISCARD);
+        } else {
+            RETAILMSG(1, (L"vc4disp: fb 0x%08x is not in the static uncached "
+                L"range, drawing uncached\r\n", ulFrame
+            ));
+            m_fCachedFb = FALSE;
+        }
+    }
+
     m_pPrimarySurface = new GPESurf(
-        m_pMode->width, m_pMode->height, (VOID*)(ULONG)pInfo->phFrameBase,
+        m_pMode->width, m_pMode->height, (VOID*)ulFrame,
         pInfo->frameStride, m_pMode->format
     );
     if (m_pPrimarySurface == NULL) {
@@ -329,9 +377,9 @@ SCODE Vc4GPE::SetMode(int modeNumber, HPALETTE *pPalette)
     g_bitMasks[1] = pColors[1];
     g_bitMasks[2] = pColors[2];
 
-    RETAILMSG(1, (L"vc4disp: mode %d %dx%d %d bpp stride %d fb 0x%08x\r\n",
+    RETAILMSG(1, (L"vc4disp: mode %d %dx%d %d bpp stride %d fb 0x%08x (%s)\r\n",
         modeNumber, m_gpeMode.width, m_gpeMode.height, m_gpeMode.Bpp,
-        pInfo->frameStride, (ULONG)pInfo->phFrameBase
+        pInfo->frameStride, ulFrame, m_fCachedFb ? L"cached" : L"uncached"
     ));
 
 cleanUp:
@@ -374,87 +422,134 @@ SCODE Vc4GPE::AllocSurface(
 
 //------------------------------------------------------------------------------
 //
+//  Method:  FlushRect
+//
+//  Writes the cached framebuffer rows covering pRect (exclusive right/bottom,
+//  any order) back to memory, so the display shows them. NULL = whole cache.
+//  The OAL cleans the whole 16 KB L1 D-cache instead of walking lines once
+//  the range is larger than the cache, so big rectangles cost no more than
+//  one full clean.
+//
+VOID Vc4GPE::FlushRect(const RECTL *pRect)
+{
+    LONG left, top, right, bottom, stride, bytesPerPixel;
+    UCHAR *pStart, *pEnd;
+
+    if (!m_fCachedFb || m_pPrimarySurface == NULL) return;
+
+    if (pRect == NULL) {
+        CacheRangeFlush(NULL, 0, CACHE_SYNC_WRITEBACK);
+        return;
+    }
+
+    left   = min(pRect->left, pRect->right);
+    right  = max(pRect->left, pRect->right);
+    top    = min(pRect->top, pRect->bottom);
+    bottom = max(pRect->top, pRect->bottom);
+
+    // Clip to the screen
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > m_gpeMode.width) right = m_gpeMode.width;
+    if (bottom > m_gpeMode.height) bottom = m_gpeMode.height;
+    if (left >= right || top >= bottom) return;
+
+    stride = m_pPrimarySurface->Stride();
+    bytesPerPixel = (m_gpeMode.Bpp + 7) >> 3;
+    if (stride <= 0 || bytesPerPixel <= 0) {
+        CacheRangeFlush(NULL, 0, CACHE_SYNC_WRITEBACK);
+        return;
+    }
+
+    // One contiguous range from the first touched byte to the last one
+    pStart = (UCHAR*)m_pPrimarySurface->Buffer() + top * stride +
+        left * bytesPerPixel;
+    pEnd = (UCHAR*)m_pPrimarySurface->Buffer() + (bottom - 1) * stride +
+        right * bytesPerPixel;
+    CacheRangeFlush(pStart, (DWORD)(pEnd - pStart), CACHE_SYNC_WRITEBACK);
+}
+
+//------------------------------------------------------------------------------
+//
 //  Method: WrappedEmulatedLine
 //
 //  Emulated line on the primary surface: hides the software cursor while the
-//  line crosses it.
+//  line crosses it and writes the touched rows back (cached framebuffer).
 //
 SCODE Vc4GPE::WrappedEmulatedLine(GPELineParms *lineParameters)
 {
     SCODE sc;
-    RECT bounds;
+    RECTL bounds;
     int N_plus_1;
 
-    // If cursor is on check for line overlap
+    // Bounding rectangle of the line
+    if (lineParameters->dN) {
+        // The line has a diagonal component
+        N_plus_1 = 2 + (
+            (lineParameters->cPels * lineParameters->dN)/lineParameters->dM
+        );
+    } else {
+        N_plus_1 = 1;
+    }
+
+    switch (lineParameters->iDir) {
+    case 0:
+        bounds.left = lineParameters->xStart;
+        bounds.top = lineParameters->yStart;
+        bounds.right = lineParameters->xStart + lineParameters->cPels + 1;
+        bounds.bottom = bounds.top + N_plus_1;
+        break;
+    case 1:
+        bounds.left = lineParameters->xStart;
+        bounds.top = lineParameters->yStart;
+        bounds.bottom = lineParameters->yStart + lineParameters->cPels + 1;
+        bounds.right = bounds.left + N_plus_1;
+        break;
+    case 2:
+        bounds.right = lineParameters->xStart + 1;
+        bounds.top = lineParameters->yStart;
+        bounds.bottom = lineParameters->yStart + lineParameters->cPels + 1;
+        bounds.left = bounds.right - N_plus_1;
+        break;
+    case 3:
+        bounds.right = lineParameters->xStart + 1;
+        bounds.top = lineParameters->yStart;
+        bounds.left = lineParameters->xStart - lineParameters->cPels;
+        bounds.bottom = bounds.top + N_plus_1;
+        break;
+    case 4:
+        bounds.right = lineParameters->xStart + 1;
+        bounds.bottom = lineParameters->yStart + 1;
+        bounds.left = lineParameters->xStart - lineParameters->cPels;
+        bounds.top = bounds.bottom - N_plus_1;
+        break;
+    case 5:
+        bounds.right = lineParameters->xStart + 1;
+        bounds.bottom = lineParameters->yStart + 1;
+        bounds.top = lineParameters->yStart - lineParameters->cPels;
+        bounds.left = bounds.right - N_plus_1;
+        break;
+    case 6:
+        bounds.left = lineParameters->xStart;
+        bounds.bottom = lineParameters->yStart + 1;
+        bounds.top = lineParameters->yStart - lineParameters->cPels;
+        bounds.right = bounds.left + N_plus_1;
+        break;
+    case 7:
+        bounds.left = lineParameters->xStart;
+        bounds.bottom = lineParameters->yStart + 1;
+        bounds.right = lineParameters->xStart + lineParameters->cPels + 1;
+        bounds.top = bounds.bottom - N_plus_1;
+        break;
+    default:
+        DEBUGMSG(GPE_ZONE_ERROR, (L"Vc4GPE::WrappedEmulatedLine: "
+            L"Invalid direction: %d\r\n", lineParameters->iDir
+        ));
+        return E_INVALIDARG;
+    }
+
+    // If the line overlaps the visible cursor, turn the cursor off
     if (m_cursorVisible && !m_cursorDisabled) {
-
-        // Calculate the bounding-rect to determine overlap with cursor
-        if (lineParameters->dN) {
-            // The line has a diagonal component
-            N_plus_1 = 2 + (
-                (lineParameters->cPels * lineParameters->dN)/lineParameters->dM
-            );
-        } else {
-            N_plus_1 = 1;
-        }
-
-        switch (lineParameters->iDir) {
-        case 0:
-            bounds.left = lineParameters->xStart;
-            bounds.top = lineParameters->yStart;
-            bounds.right = lineParameters->xStart + lineParameters->cPels + 1;
-            bounds.bottom = bounds.top + N_plus_1;
-            break;
-        case 1:
-            bounds.left = lineParameters->xStart;
-            bounds.top = lineParameters->yStart;
-            bounds.bottom = lineParameters->yStart + lineParameters->cPels + 1;
-            bounds.right = bounds.left + N_plus_1;
-            break;
-        case 2:
-            bounds.right = lineParameters->xStart + 1;
-            bounds.top = lineParameters->yStart;
-            bounds.bottom = lineParameters->yStart + lineParameters->cPels + 1;
-            bounds.left = bounds.right - N_plus_1;
-            break;
-        case 3:
-            bounds.right = lineParameters->xStart + 1;
-            bounds.top = lineParameters->yStart;
-            bounds.left = lineParameters->xStart - lineParameters->cPels;
-            bounds.bottom = bounds.top + N_plus_1;
-            break;
-        case 4:
-            bounds.right = lineParameters->xStart + 1;
-            bounds.bottom = lineParameters->yStart + 1;
-            bounds.left = lineParameters->xStart - lineParameters->cPels;
-            bounds.top = bounds.bottom - N_plus_1;
-            break;
-        case 5:
-            bounds.right = lineParameters->xStart + 1;
-            bounds.bottom = lineParameters->yStart + 1;
-            bounds.top = lineParameters->yStart - lineParameters->cPels;
-            bounds.left = bounds.right - N_plus_1;
-            break;
-        case 6:
-            bounds.left = lineParameters->xStart;
-            bounds.bottom = lineParameters->yStart + 1;
-            bounds.top = lineParameters->yStart - lineParameters->cPels;
-            bounds.right = bounds.left + N_plus_1;
-            break;
-        case 7:
-            bounds.left = lineParameters->xStart;
-            bounds.bottom = lineParameters->yStart + 1;
-            bounds.right = lineParameters->xStart + lineParameters->cPels + 1;
-            bounds.top = bounds.bottom - N_plus_1;
-            break;
-        default:
-            DEBUGMSG(GPE_ZONE_ERROR, (L"Vc4GPE::WrappedEmulatedLine: "
-                L"Invalid direction: %d\r\n", lineParameters->iDir
-            ));
-            return E_INVALIDARG;
-        }
-
-        // If the line overlaps the cursor, turn the cursor off
         RECTL cursorRect = m_cursorRect;
         RotateRectl(&cursorRect);
 
@@ -469,6 +564,10 @@ SCODE Vc4GPE::WrappedEmulatedLine(GPELineParms *lineParameters)
     }
 
     sc = EmulatedLine(lineParameters);
+
+    // Write the line back, one pixel of margin against rounding in bounds
+    bounds.left--; bounds.top--; bounds.right++; bounds.bottom++;
+    FlushRect(&bounds);
 
     // If cursor was forced off turn it back on
     if (m_cursorForcedOff) {
@@ -572,6 +671,12 @@ SCODE Vc4GPE::BltPrepare(GPEBltParms *pBltParms)
 //
 SCODE Vc4GPE::BltComplete(GPEBltParms *pBltParms)
 {
+    // Write what the blit drew back to memory (FlushRect orders the
+    // rectangle; no destination rectangle means clean the whole cache)
+    if (pBltParms->pDst == m_pPrimarySurface) {
+        FlushRect(pBltParms->prclDst);
+    }
+
     // If cursor was forced off turn it back on
     if (m_cursorForcedOff) {
         m_cursorForcedOff = FALSE;
@@ -648,6 +753,7 @@ VOID Vc4GPE::CursorOn()
         }
     }
 
+    FlushRect(&m_cursorRect);
     m_cursorVisible = TRUE;
 }
 
@@ -706,6 +812,7 @@ VOID Vc4GPE::CursorOff()
         }
     }
 
+    FlushRect(&m_cursorRect);
     m_cursorVisible = FALSE;
 }
 
