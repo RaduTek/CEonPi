@@ -15,3 +15,6 @@ obj/
 *.wrn
 *.err
 BuildARMV*.dat
+
+# Other files
+Thumbs.db
