@@ -14,10 +14,13 @@ controller so keyboards, mice and USB Ethernet work.
   **cannot build or run anything**.
 - The build happens in a Windows 7 VM (Platform Builder 7 + Visual Studio 2008 SP1) at
   `C:\WINCE700`. This repo is the contents of `C:\WINCE700\platform\raspi2`.
-- The user pulls changes in the VM, builds, copies `kernel.img` to the SD card, boots the Pi
-  and reports results (serial/KITL logs, photos of the screen, build logs).
+- The VM builds straight from this working tree (no commit or pull needed to test). The user
+  builds, copies `kernel.img` to the SD card, boots the Pi and reports results (serial/KITL logs,
+  photos of the screen, build logs, `bootlog.txt` in the repo root, which is gitignored).
 - After every change, say exactly what to build, what to expect, and which log lines or
-  behaviour confirm success. Prefer small, separately testable changes and small commits.
+  behaviour confirm success. Prefer small, separately testable changes.
+- **Only tested code gets committed** (since 2026-11-23). Leave changes uncommitted until the user
+  reports a successful test, then commit when asked (feature work goes on a branch, e.g. `vc4-gpu`).
 - Never claim hardware behaviour you have not verified. State assumptions plainly and say how to
   test them. If a register or bit is uncertain, say so.
 
@@ -51,7 +54,11 @@ controller so keyboards, mice and USB Ethernet work.
 - BSP drivers are opt-in catalog items (`raspi2/Catalog/raspi2.pbcxml`, 2026-11-23): `BSP_USBHOST`
   (dwchci), `BSP_ETHERNET` (smsc95xx, nested inside `BSP_USBHOST`), `BSP_SDHOST` (sdhcbcm, replaced our
   old opt-out `BSP_NOSD`), `BSP_AUDIO`, plus `BSP_USEVIDASDEBUGPORT` (OAL on-screen debug output for
-  no-KITL images). `BSP_NOUSB` is a **standard** variable read by the public `common.bib`/`common.reg`
+  no-KITL images). Display drivers are two mutually exclusive items (`<ChooseOneGroup>`, Location
+  `Device Drivers\Display`): `BSP_VC4DISP` (vc4disp) and `BSP_RASPIDISPLAY` (raspiBasic_ddi), replacing
+  the old opt-out `BSP_NORASPIDISPLAY`; `platform.bib`/`.reg` let vc4disp win if both are set; with
+  neither the image is headless (untested). `BSP_NODISPLAY` (standard, `common.bib`/`.reg`) stays the
+  outer gate. `BSP_NOUSB` is a **standard** variable read by the public `common.bib`/`common.reg`
   (drops the whole USB stack), so keep it as an outer gate, never repurpose it. The sample design
   `RaspiCE/RaspiCE/RaspiCE.pbxml` selects the driver items in all three configurations.
   Core OS dependencies live in `raspi2/cebasecesysgen.bat` (`if "%BSP_X%"=="1" set SYSGEN_Y=1`,
@@ -63,7 +70,8 @@ controller so keyboards, mice and USB Ethernet work.
   the mailbox), interrupt and debug code. The OAL already maps a USB host SYSINTR to VideoCore
   IRQ 9.
 - `src/kitl/` and `src/MyKitlCore/`: KITL over the PL011 UART (`kitlSerDrv.c`).
-- `src/drivers/raspiBasic_ddi/`: display driver (framebuffer through the mailbox).
+- `src/drivers/raspiBasic_ddi/`: original display driver (framebuffer through the mailbox), kept as a
+  fallback. `src/drivers/vc4disp/`: its successor (see "Display driver" below).
 - `src/bootloader/sboot`, `sloader`: bootloaders (not used when `IMGFLASH=1`).
 
 ## Boot and hardware facts learned so far
@@ -297,6 +305,25 @@ ARM1176.
     (`src\oal\oallib\ioctl.c`, the handler line was commented out) via the common
     `OALIoCtlHalGetCacheInfo` over `g_oalCacheInfo`. It was broken (returned FALSE -> `CeGetCacheInfo`
     failed), which a future DMA path would need; it is harmless to PIO.
+
+## Display driver: vc4disp (started 2026-11-23)
+- `src\drivers\vc4disp` (`vc4disp.dll`, class `Vc4GPE`, GPE based) replaces `raspiBasic_ddi` step by
+  step; the old driver stays as the fallback catalog item.
+- How both work today: the OAL allocates the framebuffer at boot (`InitVideoSystem`, 16 bpp =
+  `VID_BITSPP`) and describes it as the single mode of `IOCTL_HAL_DDI` (`src\oal\oallib\ddi.c`). The
+  `phFrameBase` field carries the **uncached static VA** (`0xA0000000 | pa`), not a physical address.
+  `DDHAL_COMMAND_SET_MODE` only stops the on-screen console/splash; `SetPalette`/`Power` are stubs.
+  All drawing is GPE software emulation with a software cursor.
+- **D0 done and verified (2026-11-23, Pi 1 Model B):** vc4disp loads and boots to the desktop; log
+  line `vc4disp: mode 1 1920x1080 16 bpp stride 3840 fb 0xae7fe000` (GWES passes the OAL's `modeId`
+  1, which the OAL ignores; `fb` is the uncached `0xA...` view as expected).
+- Plan: D0 copy + clean-up (no behaviour change);
+  D1 speed up drawing (GDI reads from uncached memory: cached shadow surface or write-combined
+  mapping); D2 driver-owned mode set through a generic mailbox property-tag IOCTL (16/32 bpp, blanking
+  for `PowerHandler`); D3 firmware hardware cursor (tags `0x00008010/11`, unverified); D4 DMA fills and
+  copies (bus addresses, interrupt, free channel; raspiBasic's disabled code used channel 1, which the
+  Linux DT mask `0x7f35` reserves for the VideoCore - check); D5 optional DirectDraw flip/vsync. V3D
+  (OpenGL ES) is out of scope.
 
 ## Power: idle, restart, shutdown (2026-11-21)
 - **Idle:** `OEMIdle` (`src\oal\oallib\power.c`) does drain-write-buffer + CP15 WFI

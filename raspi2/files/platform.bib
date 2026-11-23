@@ -68,11 +68,21 @@ MODULES
 
 ;------------- Display Driver -------------------------------------------------------------
 ; @CESYSGEN IF CE_MODULES_DISPLAY
+; Display drivers are opt-in catalog items (mutually exclusive): BSP_VC4DISP=1
+; "Display: VideoCore IV (vc4disp)" or BSP_RASPIDISPLAY=1 "Display: basic
+; framebuffer (raspiBasic_ddi)". If both are set, vc4disp wins. With neither,
+; the image has no BSP display driver (headless, untested).
 IF BSP_NODISPLAY !
 
-IF BSP_NORASPIDISPLAY !
+IF BSP_VC4DISP
+    vc4disp.dll               $(_FLATRELEASEDIR)\vc4disp.dll            NK         SHMK
+ENDIF BSP_VC4DISP
+
+IF BSP_VC4DISP !
+IF BSP_RASPIDISPLAY
     raspibasic_ddi.dll        $(_FLATRELEASEDIR)\raspibasic_ddi.dll     NK         SHMK
-ENDIF BSP_NORASPIDISPLAY !    
+ENDIF BSP_RASPIDISPLAY
+ENDIF BSP_VC4DISP !
 
 ELSE
     ddi_nop.dll        $(_FLATRELEASEDIR)\ddi_nop.dll     NK         SHMK

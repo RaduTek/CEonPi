@@ -29,23 +29,43 @@ ENDIF BSP_NOEXAMPLEREG !
 
 ;------------ Display Driver -------------------------------------------------
 ; @CESYSGEN IF CE_MODULES_DISPLAY
+; Display drivers are opt-in catalog items (mutually exclusive), see
+; platform.bib: BSP_VC4DISP=1 (vc4disp.dll) or BSP_RASPIDISPLAY=1
+; (raspibasic_ddi.dll); vc4disp wins if both are set. With neither, no BSP
+; display driver is registered (headless, untested).
 IF BSP_NODISPLAY !
 
-IF BSP_NORASPIDISPLAY !
+IF BSP_VC4DISP
+[HKEY_LOCAL_MACHINE\Drivers\Display\vc4disp\Config]
+    "DisplayDll"="vc4disp.dll"
+
+[HKEY_LOCAL_MACHINE\System\GDI\Drivers]
+    "Display"="vc4disp.dll"
+
+; GWES will pass this value to the Display driver; the driver will open the
+; key to which it points to read its configuration.
+[HKEY_LOCAL_MACHINE\System\GDI\DisplayCandidates]
+    "Candidate10"="Drivers\\Display\\vc4disp\\Config"
+ENDIF BSP_VC4DISP
+
+IF BSP_VC4DISP !
+IF BSP_RASPIDISPLAY
 [HKEY_LOCAL_MACHINE\Drivers\Display\raspiddibasic\Config]
     "DisplayDll"="raspibasic_ddi.dll"
 
 [HKEY_LOCAL_MACHINE\System\GDI\Drivers]
     "Display"="raspibasic_ddi.dll"
 
-; Settings to rotate the screen by 0 degrees clockwise upon download
-[HKEY_LOCAL_MACHINE\System\GDI\Rotation]
-    "Angle"=dword:0
-
 ; GWES will pass this value to the Display driver; the driver will open the
 ; key to which it points to read its configuration.
 [HKEY_LOCAL_MACHINE\System\GDI\DisplayCandidates]
     "Candidate10"="Drivers\\Display\\raspiddibasic\\Config"
+ENDIF BSP_RASPIDISPLAY
+ENDIF BSP_VC4DISP !
+
+; Settings to rotate the screen by 0 degrees clockwise upon download
+[HKEY_LOCAL_MACHINE\System\GDI\Rotation]
+    "Angle"=dword:0
 
 ; Let GWES save/restore video memory during suspend/resume
 [HKEY_LOCAL_MACHINE\SYSTEM\GWE]
@@ -54,8 +74,6 @@ IF BSP_NORASPIDISPLAY !
 ;   "PORepaint"=dword:2 - gwe should invalidate and repaint
 ;   "PORepaint"=dword:3 - gwe and driver need to save video memory
     "PORepaint"=dword:1
-
-ENDIF BSP_NORASPIDISPLAY !
 
 ENDIF BSP_NODISPLAY !
 ; @CESYSGEN ENDIF CE_MODULES_DISPLAY
