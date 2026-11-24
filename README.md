@@ -47,7 +47,7 @@ These are hardware features that are functional
 |-|-|-|
 | UART | Basic | Used for KITL debugger connection with Visual Studio |
 | [Audio](docs/audio.md) | Complete | Support PWM audio output on the Pi 1 Model B with dithering enhancements for quality |
-| Display | Basic | HDMI or composite TV output at the native display resolution (from the firmware), no acceleration whatsoever |
+| Display | Accelerated (CPU/DMA) | HDMI or composite TV output at the native display resolution (from the firmware, or set in `config.txt`), 16 bpp. Faster software drawing (cached framebuffer, optimized blits), DMA fills, VideoCore hardware cursor, direct framebuffer access for video players (TCPMP). See [catalog items](docs/catalog_items.md) |
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
 | [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
 | [USB Ethernet](docs/ethernet.md) | Working | SMSC LAN9512 on the Pi 1 Model B: DHCP, IPv4/IPv6, firmware MAC address. ~5.6 MB/s receive, ~3.8 MB/s send (Release build) |
@@ -67,7 +67,7 @@ Things I plan on getting working, in order of priority
 | Feature | Comments |
 |-|-|
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |
-| Better Display | Hardware acceleration, resolution changes at runtime |
+| Video acceleration (VCHIQ) | Hardware video overlay (scaling and colour conversion) and hardware video decoding through the firmware's VCHIQ interface. Would allow a DirectDraw overlay for video players |
 | SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |
 | USB Function | Useful only on the Pi Zero, let the Pi be connected as a USB device to a computer<br>(for ActiveSync or Mass Storage) |
 | USB Isochronous mode | Needed for USB audio and video class devices<br>CE only includes a USB audio driver |
@@ -80,7 +80,7 @@ These are features I don't have much hope at implementing
 |-|-|
 | SDIO Wi-Fi | Support for the built-in Wi-Fi of the Pi Zero W |
 | Bluetooth | Support for the built-in Bluetooth of the Pi Zero W |
-| GPU Acceleration | I just know that the driver situation on Linux is not the greatest, with Broadcom obviously being at fault |
+| 3D GPU Acceleration | OpenGL ES on the VideoCore IV 3D core. I just know that the driver situation on Linux is not the greatest, with Broadcom obviously being at fault |
 
 
 ### Other features

@@ -9,13 +9,19 @@ The hardware drivers are opt-in too: an OS design without the USB host, Ethernet
     - **Shut Down dialog (poweroff.exe)** (`BSP_POWEROFF`) - convenient way of shutting down or restarting the OS, with a desktop shortcut
     - **Audio test (audiotest.exe)** (`BSP_AUDIOTEST`) - plays left/right test tones in several formats and reports timing; `audiotest file.wav` plays a WAV file <br> Selects Waveform Audio. Needs an audio driver
     - **Volume tray icon (voltray.exe)** (`BSP_VOLTRAY`) - speaker icon in the taskbar with a volume slider and a Mute box, started from the Startup folder <br> Selects Waveform Audio, Common Control and Standard Shell. Needs an audio driver
-    - **GDI benchmark (gdibench.exe)** (`BSP_GDIBENCH`) - times the display driver (fills, inverts, scrolling, text, uploads, screen readbacks), with a desktop shortcut; results on screen and in the debug output
+    - **GDI benchmark (gdibench.exe)** (`BSP_GDIBENCH`) - times the display driver (fills, inverts, scrolling, text, image copies from 16/24/32 bpp bitmaps, stretch, transparent and alpha blits, screen readbacks), with a desktop shortcut; results on screen and in the debug output
 - **Debugging**
     - **On-screen debug output** (`BSP_USEVIDASDEBUGPORT`) - shows the kernel debug output on the screen during boot. Always on in images with KITL, so this is for images without it (Release) <br> Built into the OAL: rebuild the BSP, not just the image, after changing it
 - **Device Drivers\Audio**
     - **Analog audio (Pi 1 3.5 mm jack)** (`BSP_AUDIO`) - PWM audio driver for the 3.5 mm jack of the Pi 1 (the Pi Zero has no jack), see [docs/audio.md](docs/audio.md) <br> Selects Waveform Audio
 - **Device Drivers\Display** (choose one; with neither the image has no BSP display driver, which is untested)
-    - **Display: VideoCore IV (vc4disp)** (`BSP_VC4DISP`) - the new display driver, where acceleration, runtime mode changes and a hardware cursor will go. Native resolution, 16 bpp, software drawing through the cached framebuffer (registry `CachedFrameBuffer`, default 1), to make screen reads (scrolling, moving windows) cheaper than with the basic driver. Wins if both display items are set
+    - **Display: VideoCore IV (vc4disp)** (`BSP_VC4DISP`) - the recommended display driver. Native resolution (or the `config.txt` framebuffer size), 16 bpp. Wins if both display items are set. Features, each with a registry switch under `Drivers\Display\vc4disp\Config`:
+        - drawing through the cached framebuffer, about 2x faster fills, scrolling and screen reads (`CachedFrameBuffer`)
+        - Microsoft's optimized blits for transparent, stretched and alpha-blended images (`FastBlt`)
+        - its own fast 24/32 bpp image copies and invert, which make IE7 pages draw much faster (`DriverBlt`)
+        - VideoCore hardware cursor, moved from a background thread so it doesn't stall other apps (`HwCursor`, `HwCursorInterval`)
+        - DMA for large fills (`DmaBlt`; DMA copies and bursts are off: slower, or unstable)
+        - direct framebuffer access for video players such as TCPMP (`RawFrameBuffer`)
     - **Display: basic framebuffer (raspiBasic_ddi)** (`BSP_RASPIDISPLAY`) - the original driver (Microsoft flat sample), kept as a known-good fallback
 - **Device Drivers\Ethernet**
     - **USB Ethernet (SMSC LAN95xx)** (`BSP_ETHERNET`) - driver for the Ethernet chip built into the Pi 1 Model B/B+ (the Pi Zero has none), see [docs/ethernet.md](docs/ethernet.md) <br> Selects USB Host Support and Wired Local Area Network (NDIS, TCP/IP). Needs the "USB host controller" item
