@@ -373,7 +373,7 @@ BOOL Vc4GPE::OverlayCreate(DWORD dwFourCC, DWORD dwWidth, DWORD dwHeight,
 
     for (i = 0; i < dwBuffers; i++) ppFrames[i] = pVa + i * frame;
 
-    RETAILMSG(1, (L"vc4disp: overlay: created %ux%u %c%c%c%c x%u, pitch %u, "
+    DEBUGMSG(GPE_ZONE_PDD, (L"vc4disp: overlay: created %ux%u %c%c%c%c x%u, pitch %u, "
         L"%u bytes at bus 0x%08x, display %u layer %d, process 0x%08x va 0x%08x\r\n",
         dwWidth, dwHeight,
         (WCHAR)(dwFourCC & 0xFF), (WCHAR)((dwFourCC >> 8) & 0xFF),
@@ -427,7 +427,7 @@ VOID Vc4GPE::OverlayDestroy()
 
     if (fHidden) {
         FreePhysMem(m_pOvlMem);
-        RETAILMSG(1, (L"vc4disp: overlay: destroyed\r\n"));
+        DEBUGMSG(GPE_ZONE_PDD, (L"vc4disp: overlay: destroyed\r\n"));
     } else {
         // The HVS may still be reading it: leak it rather than free it
         RETAILMSG(1, (L"vc4disp: overlay: hide not confirmed, %u bytes at bus "

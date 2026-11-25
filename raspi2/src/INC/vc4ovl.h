@@ -29,10 +29,10 @@
 // by the firmware but never shown (Pi 1 Model B, 2026-11-25).
 //
 // Every SHOW and FLIP takes a sequence number (dwSeqQueued); dwSeqDone is
-// the newest one the firmware has answered. Whether the HVS has stopped
-// reading the previous buffer at that point (next vsync?) is not known yet:
-// render into a buffer that left the screen two flips ago (3 buffers) to
-// be safe.
+// the newest one the firmware has answered. The answer does not mean the
+// HVS has stopped reading the previous buffer (flipping far faster than the
+// display refresh tears); reuse a buffer only after a refresh has passed.
+// At video rates (30 fps) 2 or 3 buffers showed no tearing.
 //
 #ifndef __VC4OVL_H
 #define __VC4OVL_H

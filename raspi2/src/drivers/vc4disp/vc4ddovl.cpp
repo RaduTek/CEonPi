@@ -170,7 +170,7 @@ SCODE Vc4OvlSurf::Create(int width, int height, EDDGPEPixelFormat pixelFormat,
     pSurf->m_dwBusU = pSurf->m_dwBusV + (pitch / 2) * (height / 2);
     pSurf->m_dwSurfaceSize = cbFrame;
 
-    RETAILMSG(1, (L"vc4disp: DirectDraw overlay surface %dx%d YV12 pitch %u, "
+    DEBUGMSG(GPE_ZONE_PDD, (L"vc4disp: DirectDraw overlay surface %dx%d YV12 pitch %u, "
         L"bus 0x%08x, process 0x%08x va 0x%08x\r\n",
         width, height, pitch, pSurf->m_dwBusY, dwCaller, (DWORD)pUser));
 
@@ -281,7 +281,7 @@ HRESULT Vc4GPE::DdOverlayShow(Vc4OvlSurf *pSurf, const RECT *prcSrc,
     MboxWake();
 
     if (!fWasShown) {
-        RETAILMSG(1, (L"vc4disp: DirectDraw overlay shown: %dx%d src (%d,%d)-(%d,%d) "
+        DEBUGMSG(GPE_ZONE_PDD, (L"vc4disp: DirectDraw overlay shown: %dx%d src (%d,%d)-(%d,%d) "
             L"dst (%d,%d)-(%d,%d)\r\n", pSurf->Width(), pSurf->Height(),
             prcSrc->left, prcSrc->top, prcSrc->right, prcSrc->bottom,
             prcDst->left, prcDst->top, prcDst->right, prcDst->bottom));
@@ -338,7 +338,7 @@ HRESULT Vc4GPE::DdOverlayHide()
     if (fHide) {
         MboxWake();
         OverlayWait(dwSeq, DDOVL_WAIT_MS);
-        RETAILMSG(1, (L"vc4disp: DirectDraw overlay hidden\r\n"));
+        DEBUGMSG(GPE_ZONE_PDD, (L"vc4disp: DirectDraw overlay hidden\r\n"));
     }
     return DD_OK;
 }

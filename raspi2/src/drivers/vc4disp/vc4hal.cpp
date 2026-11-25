@@ -26,12 +26,11 @@
 //  GUID_GetDriverInfo_VidMemList into the client, and Lock pointers inside a
 //  block are translated to the client's mapping. Every shipping CE 7 DDGPE
 //  driver (OMAP35xx, SMDK6410, NE1TB, iMX27) lists a view it made itself
-//  with VirtualAlloc + VirtualCopy(PAGE_PHYSICAL). The first try listed the
-//  kernel's static cached view of the framebuffer (0x8xxxxxxx, what GDI
-//  draws through) and the client's ddraw.dll raised exception 0x57
-//  (ERROR_INVALID_PARAMETER) right after HALInit. So DirectDraw now gets its
-//  own uncached VirtualCopy view (m_pDdFbView, made in SetMode), and HalLock
-//  moves primary-surface pointers from GDI's view into it. GDI keeps the
+//  with VirtualAlloc + VirtualCopy(PAGE_PHYSICAL), so DirectDraw gets its own
+//  uncached VirtualCopy view here too (m_pDdFbView, made in SetMode), and
+//  HalLock moves primary-surface pointers from GDI's view into it. (The
+//  ERROR_INVALID_PARAMETER exception seen while bringing this up was TCPMP
+//  taking its desktop DirectDraw path on CE 7, not this.) GDI keeps the
 //  cached static view (fast). The framebuffer is VideoCore memory outside
 //  CE's RAM, so PAGE_PHYSICAL takes no RAM page reference here (unlike the
 //  trap in vc4overlay.cpp).
@@ -50,9 +49,6 @@
 #include <ddgpe.h>
 #include <ddhfuncs.h>
 #include "vc4disp.h"
-
-// GetDriverInfo queries logged (diagnostics; each KITL line costs ~30 ms)
-#define VC4HAL_LOG_QUERIES      16
 
 //------------------------------------------------------------------------------
 // Callbacks from the DirectDraw object
@@ -213,7 +209,6 @@ DWORD WINAPI HalLock(LPDDHAL_LOCKDATA pd)
 //
 DWORD WINAPI HalGetDriverInfo(LPDDHAL_GETDRIVERINFODATA lpInput)
 {
-    static DWORD s_nLogged = 0;
     Vc4GPE *pGpe = static_cast<Vc4GPE*>(GetDDGPE());
     ULONG base = 0, size = 0;
 
@@ -248,14 +243,11 @@ DWORD WINAPI HalGetDriverInfo(LPDDHAL_GETDRIVERINFODATA lpInput)
         lpInput->ddRVal = DDERR_CURRENTLYNOTAVAIL;
     }
 
-    if (s_nLogged < VC4HAL_LOG_QUERIES) {
-        s_nLogged++;
-        RETAILMSG(1, (L"vc4disp: DirectDraw GetDriverInfo {%08x-%04x} expected %u "
-            L"-> 0x%08x (base 0x%08x size %u)\r\n",
-            lpInput->guidInfo.Data1, lpInput->guidInfo.Data2,
-            lpInput->dwExpectedSize, lpInput->ddRVal, base, size
-        ));
-    }
+    DEBUGMSG(GPE_ZONE_PDD, (L"vc4disp: DirectDraw GetDriverInfo {%08x-%04x} "
+        L"expected %u -> 0x%08x (base 0x%08x size %u)\r\n",
+        lpInput->guidInfo.Data1, lpInput->guidInfo.Data2,
+        lpInput->dwExpectedSize, lpInput->ddRVal, base, size
+    ));
 
     DEBUGLEAVE(HalGetDriverInfo);
     return DDHAL_DRIVER_HANDLED;
