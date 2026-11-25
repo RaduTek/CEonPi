@@ -432,6 +432,27 @@ ARM1176.
   **Display 0 shows nothing**: use the id from `GET_DISPLAY_ID`. The tag's req/resp word comes back
   **0x00000000** (no response bit) even when it works, so `MailboxTags`' per-tag response check must
   not be applied to Set plane; the value words come back unchanged.
+  **V1 overlay engine verified (2026-11-25, Pi 1 Model B)** with `ovltest.exe` (`src\apps\ovltest`,
+  `BSP_OVLTEST`): private escape `VC4OVL_ESCAPE` (`src\INC\vc4ovl.h`: CREATE/DESTROY/SHOW/FLIP/QUERY,
+  1-3 buffers mapped into the caller, sequence numbers, `VC4OVL_FLAG_WAIT`), engine in
+  `vc4overlay.cpp`, and the cursor thread generalized into a **mailbox thread** (`vc4mbox.cpp`) that
+  sends the newest cursor state and the newest plane state in one asynchronous message (the OAL tracks
+  only one pending async message). Measured: plane update ~1.8-1.9 ms (async, sleeping), 640x360 YV12
+  scaled to 1920x1080 at 30 fps with **74-75% idle**; unpaced flips reach ~330/s. YV12 and I420, moving
+  window and clipping (driver clips dst to the screen, cuts src in 16.16) all correct; cursor stays on
+  top. **Packed YUY2 (type 45) / UYVY (47): firmware accepts the plane but shows nothing** (fkms does
+  not offer them either), so the overlay is planar 4:2:0 only. **The firmware's reply does not mean the
+  HVS has left the old buffer:** at 330 flips/s there was heavy tearing; at 30 fps 2 or 3 buffers
+  show none or almost none. Reuse a buffer only after a refresh has passed (3 buffers at video rates).
+  **Kernel trap (verified in `Z:\private\winceos\coreos\nk\kernel\vm.c`):** `VirtualCopyEx` with
+  `PAGE_PHYSICAL` maps *RAM* pages **without** a page reference (`VMCopyPhysical`, `fIncRef` FALSE), but
+  releasing the mapping (`VirtualFreeEx`, or the process exiting) still calls `FreePhysPage`. With
+  `AllocPhysMem` memory that double-frees every page (`DEBUGCHK failed in physmem.c at line 1060`,
+  then `VerifyPhysmemList: In-use page in free-list`, idle stuck at 0%). Map driver RAM into a process
+  with `VirtualAllocCopyEx(GetCurrentProcess(), hDst, kernelVa, cb, prot)` instead (locks the pages
+  and takes a reference: `VMAllocCopy` -> `VMSetPages` -> `DupPhysPage`); release with `VirtualFreeEx`
+  at the 64 KB block base. RawFrameBuffer's `PAGE_PHYSICAL` mapping is safe only because the
+  firmware framebuffer lies outside CE's RAM.
 - **Future goal (user, 2026-11-23): VCHIQ.** The real video acceleration path: HVS YUV planes
   (hardware scaling and colour conversion through dispmanx) and hardware decode (MMAL/OpenMAX) are
   only reachable through the firmware's VCHIQ interface, not the mailbox. A DirectDraw overlay would

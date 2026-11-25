@@ -24,6 +24,7 @@ SOURCES=\
     vc4disp.cpp \
     vc4blt.cpp \
     vc4cursor.cpp \
+    vc4mbox.cpp \
     vc4dma.cpp \
     vc4escape.cpp \
     vc4overlay.cpp

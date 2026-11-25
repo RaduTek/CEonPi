@@ -135,6 +135,7 @@ BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
     settings.fRawFb = ReadRegDword(hKey, VC4DISP_REG_RAWFB, 1) != 0;
     settings.fRawFbWriteCombine = ReadRegDword(hKey, VC4DISP_REG_RAWFBWC, 1) != 0;
     settings.fOverlayProbe = ReadRegDword(hKey, VC4DISP_REG_OVERLAYPROBE, 0) != 0;
+    settings.fOverlay = ReadRegDword(hKey, VC4DISP_REG_OVERLAY, 1) != 0;
     settings.dwDmaMinPixels = ReadRegDword(hKey, VC4DISP_REG_DMAMINPIXELS, 16384);
     // Burst 8 lost the HDMI signal (bus offset 0x40000000) or hung the
     // system (0xC0000000) on a Pi 1 B; single transfers (0) work
@@ -219,24 +220,55 @@ Vc4GPE::Vc4GPE(const VC4DISP_SETTINGS *pSettings)
     m_fHwCursorLogged = FALSE;
     m_pHwCursorBuf = NULL;
     m_dwHwCursorBus = 0;
-    InitializeCriticalSection(&m_csCursor);
-    m_hCursorThread = NULL;
-    m_hCursorEvent = NULL;
-    m_fCursorExit = FALSE;
+    InitializeCriticalSection(&m_csMbox);
+    m_hMboxThread = NULL;
+    m_hMboxEvent = NULL;
+    m_fMboxExit = FALSE;
+    m_pMboxMsg = NULL;
+    m_dwMboxMsgBus = 0;
+    m_fMailboxAsync = TRUE;
+    m_pSysTimer = NULL;
     m_fCursorPending = FALSE;
     m_fCursorVisible = FALSE;
     m_xCursor = 0;
     m_yCursor = 0;
     m_fHwCursorFailed = FALSE;
     m_dwCursorIntervalMs = pSettings->dwHwCursorInterval;
-    m_pSysTimer = NULL;
+    m_dwCursorLastMs = 0;
     m_nCursorMoves = 0;
     m_nCursorCalls = 0;
     m_dwCursorUsTotal = 0;
     m_dwCursorUsMax = 0;
-    m_pHwCursorMsg = NULL;
-    m_dwHwCursorMsgBus = 0;
-    m_fMailboxAsync = TRUE;
+    InitializeCriticalSection(&m_csOvl);
+    m_fOverlayEnabled = pSettings->fOverlay;
+    m_fOvlDisplayKnown = FALSE;
+    m_dwOvlDisplay = 0;
+    m_ovlLayer = 0;
+    m_fOvlCreated = FALSE;
+    m_dwOvlFourCC = 0;
+    m_dwOvlWidth = 0;
+    m_dwOvlHeight = 0;
+    m_dwOvlBuffers = 0;
+    m_dwOvlPitch = 0;
+    m_dwOvlChromaPitch = 0;
+    memset(m_dwOvlOffset, 0, sizeof(m_dwOvlOffset));
+    m_dwOvlFrameBytes = 0;
+    m_pOvlMem = NULL;
+    m_dwOvlBus = 0;
+    m_cbOvlMem = 0;
+    m_dwOvlOwner = 0;
+    m_pOvlOwnerVa = NULL;
+    m_fOvlShow = FALSE;
+    memset(&m_rcOvlSrc, 0, sizeof(m_rcOvlSrc));
+    memset(&m_rcOvlDst, 0, sizeof(m_rcOvlDst));
+    m_dwOvlShown = 0;
+    m_fOvlPending = FALSE;
+    m_dwOvlSeqQueued = 0;
+    m_dwOvlSeqDone = 0;
+    m_hOvlDoneEvent = NULL;
+    m_nOvlCalls = 0;
+    m_dwOvlUsTotal = 0;
+    m_dwOvlUsMax = 0;
     m_fDmaEnabled = pSettings->fDmaBlt;
     m_fDmaReady = FALSE;
     m_fDmaCopy = pSettings->fDmaCopy;
@@ -272,12 +304,18 @@ Vc4GPE::~Vc4GPE()
     delete [] m_cursorStore; m_cursorStore = NULL;
     delete [] m_cursorXor; m_cursorXor = NULL;
     delete [] m_cursorAnd; m_cursorAnd = NULL;
-    HwCursorDeinit();
+    OverlayDestroy();
+    MboxDeinit();
     if (m_pHwCursorBuf != NULL) {
         FreePhysMem(m_pHwCursorBuf);
         m_pHwCursorBuf = NULL;
     }
-    DeleteCriticalSection(&m_csCursor);
+    if (m_hOvlDoneEvent != NULL) {
+        CloseHandle(m_hOvlDoneEvent);
+        m_hOvlDoneEvent = NULL;
+    }
+    DeleteCriticalSection(&m_csMbox);
+    DeleteCriticalSection(&m_csOvl);
 }
 
 //------------------------------------------------------------------------------

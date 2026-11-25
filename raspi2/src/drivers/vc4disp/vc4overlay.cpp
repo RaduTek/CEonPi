@@ -1,25 +1,13 @@
 //
-// vc4overlay.cpp - VideoCore HVS overlay plane for vc4disp (CEonPi)
+// vc4overlay.cpp - VideoCore HVS video overlay for vc4disp (CEonPi)
 //
-// Video acceleration, milestone V0: a probe. The firmware's "Set plane"
-// property tag (0x00048015, used by the Linux fkms driver) puts an image on
-// an HVS plane, scaled and colour-converted by the hardware, without VCHIQ.
-// Unverified: whether the firmware accepts it while the legacy mailbox
-// framebuffer is active (we are not in fkms mode). The probe answers that.
-//
-// Registry OverlayProbe=1 starts a thread after the first SetMode that:
-//   1. queries and logs the number of displays, the id of display 0 and the
-//      legacy framebuffer's layer;
-//   2. builds a 320x240 YUV 4:2:0 planar test image (colour bars over a
-//      luma ramp) in uncached physically contiguous memory;
-//   3. stage 1 (t=10 s): shows it on plane 1 of the queried display id,
-//      one layer above the framebuffer, at 100,100 scaled to 640x480;
-//      stage 2 (t=20 s): moves it to 400,200 scaled to 960x540;
-//      stage 3 (t=30 s): disables it;
-//      stage 4 (t=40 s, only if the display id is not 0): shows it again on
-//      display 0 at 100,100 640x480; stage 5 (t=50 s): disables it.
-// Each stage logs the tag's response word, so the log plus what was seen
-// on screen tells which display number and layer work.
+// The firmware's "Set plane" property tag (0x00048015, used by the Linux
+// fkms driver) puts an image on an HVS plane, scaled and colour-converted by
+// the hardware, without VCHIQ. Verified on a Pi 1 Model B (2026-11-25, V0
+// probe below): it works alongside the legacy mailbox framebuffer, on the
+// display id GET_DISPLAY_ID returns for index 0 (2 = HDMI; display 0 shows
+// nothing), one layer above the framebuffer's (-127). The firmware leaves
+// the tag's response bit clear even when it works.
 //
 // Set plane message (Linux vc4_firmware_kms.c struct set_plane, 60 bytes,
 // little endian; built word by word here to avoid packing questions):
@@ -34,6 +22,26 @@
 //   w14 transform (0)
 // Disabling a plane: same tag, only display and plane_id set.
 // The firmware assumes chroma pitch = luma pitch / 2 for 4:2:0.
+//
+// V1 overlay engine: one overlay, reached through the private escape in
+// vc4ovl.h (the DirectDraw overlay will sit on the same engine). CREATE
+// allocates 1..3 frame buffers in one physically contiguous uncached block
+// and maps it into the calling process; SHOW sets the source and
+// destination rectangles (the destination is clipped to the screen here,
+// the source adjusted in 16.16); FLIP picks the buffer on screen. SHOW and
+// FLIP only queue the new plane state (sequence number m_dwOvlSeqQueued);
+// the mailbox thread (vc4mbox.cpp) sends it and sets m_dwOvlSeqDone when the
+// firmware has answered. DESTROY hides the plane and frees the buffers only
+// once the firmware has answered the hide; otherwise it leaks them rather
+// than let the HVS scan freed memory.
+//
+// Limits: if the owning process exits without DESTROY, the plane stays on
+// screen until another process creates an overlay (the owner is then seen
+// to be gone and its overlay destroyed). The overlay is always above the
+// desktop (no colour key: the 16 bpp desktop has no alpha), so windows over
+// the video area are hidden by it; the hardware cursor stays on top.
+//
+// Registry Overlay=0 turns the escape off.
 //
 #define DDI 1
 #include <windows.h>
@@ -61,6 +69,17 @@
 
 #define BUS_UNCACHED_ALIAS      0xC0000000
 
+// The overlay's HVS plane (plane 0 would be fkms's primary)
+#define OVL_PLANE_ID            1
+
+// Longest wait for the firmware to answer a plane update
+#define OVL_WAIT_MS             100
+#define OVL_DESTROY_WAIT_MS     300
+
+// Black: Y 16, U and V 128 (BT.601 limited range)
+#define OVL_BLACK_Y             0x10101010
+#define OVL_BLACK_C             0x80808080
+
 // Test image: 4:2:0 planar, luma pitch a multiple of 32 bytes
 #define PROBE_W                 320
 #define PROBE_H                 240
@@ -71,6 +90,527 @@
 #define PROBE_PLANE_ID          1
 #define PROBE_STAGE_MS          10000
 
+//------------------------------------------------------------------------------
+//
+//  Function:  FillDwords
+//
+static VOID FillDwords(BYTE *p, DWORD cb, DWORD dwValue)
+{
+    DWORD *pd = (DWORD*)p, n = cb / sizeof(DWORD);
+
+    while (n-- != 0) *pd++ = dwValue;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Function:  IsProcessAlive
+//
+static BOOL IsProcessAlive(DWORD dwProcessId)
+{
+    HANDLE hProc;
+    DWORD dwCode = 0;
+    BOOL fAlive = FALSE;
+
+    hProc = OpenProcess(0, FALSE, dwProcessId);
+    if (hProc != NULL) {
+        fAlive = GetExitCodeProcess(hProc, &dwCode) && (dwCode == STILL_ACTIVE);
+        CloseHandle(hProc);
+    }
+    return fAlive;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayEscape
+//
+//  VC4OVL_ESCAPE (see vc4ovl.h). Returns 1 on success, (ULONG)-1 on failure
+//  (with SetLastError), 0 when the overlay is turned off.
+//
+ULONG Vc4GPE::OverlayEscape(ULONG cjIn, PVOID pvIn, ULONG cjOut, PVOID pvOut)
+{
+    const VC4OVL_REQUEST *pReq = (const VC4OVL_REQUEST*)pvIn;
+    VC4OVL_INFO *pInfo = NULL;
+    DWORD dwCaller, dwSeq = 0, dwError = ERROR_SUCCESS;
+    BOOL fWait = FALSE;
+    BYTE *frames[VC4OVL_MAX_BUFFERS];
+
+    if (!m_fOverlayEnabled) return 0;
+
+    if (pReq == NULL || cjIn < sizeof(VC4OVL_REQUEST) ||
+        pReq->dwSize < sizeof(VC4OVL_REQUEST)
+    ) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return (ULONG)-1;
+    }
+    if (pvOut != NULL && cjOut >= sizeof(VC4OVL_INFO)) {
+        pInfo = (VC4OVL_INFO*)pvOut;
+    }
+    dwCaller = (DWORD)GetCallerVMProcessId();
+
+    EnterCriticalSection(&m_csOvl);
+
+    // Everything but CREATE and QUERY needs the caller's own overlay
+    if (pReq->dwCommand != VC4OVL_CMD_CREATE &&
+        pReq->dwCommand != VC4OVL_CMD_QUERY &&
+        (!m_fOvlCreated || m_dwOvlOwner != dwCaller)
+    ) {
+        dwError = m_fOvlCreated ? ERROR_ACCESS_DENIED : ERROR_INVALID_HANDLE;
+        goto cleanUp;
+    }
+
+    switch (pReq->dwCommand) {
+    case VC4OVL_CMD_CREATE:
+        memset(frames, 0, sizeof(frames));
+        if (!OverlayCreate(pReq->dwFourCC, pReq->dwWidth, pReq->dwHeight,
+                pReq->dwBuffers, frames)) {
+            dwError = GetLastError();
+            if (dwError == ERROR_SUCCESS) dwError = ERROR_GEN_FAILURE;
+        }
+        break;
+
+    case VC4OVL_CMD_DESTROY:
+        OverlayDestroy();
+        break;
+
+    case VC4OVL_CMD_SHOW:
+        if (pReq->fShow && (
+            pReq->rcSrc.left < 0 || pReq->rcSrc.top < 0 ||
+            pReq->rcSrc.right > (LONG)m_dwOvlWidth ||
+            pReq->rcSrc.bottom > (LONG)m_dwOvlHeight ||
+            pReq->rcSrc.right <= pReq->rcSrc.left ||
+            pReq->rcSrc.bottom <= pReq->rcSrc.top ||
+            pReq->rcDst.right <= pReq->rcDst.left ||
+            pReq->rcDst.bottom <= pReq->rcDst.top ||
+            pReq->rcDst.right - pReq->rcDst.left > 0x7FFF ||
+            pReq->rcDst.bottom - pReq->rcDst.top > 0x7FFF)
+        ) {
+            dwError = ERROR_INVALID_PARAMETER;
+            break;
+        }
+        EnterCriticalSection(&m_csMbox);
+        m_fOvlShow = (pReq->fShow != 0);
+        if (m_fOvlShow) {
+            m_rcOvlSrc = pReq->rcSrc;
+            m_rcOvlDst = pReq->rcDst;
+        }
+        dwSeq = OverlayQueueLocked();
+        LeaveCriticalSection(&m_csMbox);
+        MboxWake();
+        fWait = (pReq->dwFlags & VC4OVL_FLAG_WAIT) != 0;
+        break;
+
+    case VC4OVL_CMD_FLIP:
+        if (pReq->dwBuffer >= m_dwOvlBuffers) {
+            dwError = ERROR_INVALID_PARAMETER;
+            break;
+        }
+        EnterCriticalSection(&m_csMbox);
+        m_dwOvlShown = pReq->dwBuffer;
+        dwSeq = OverlayQueueLocked();
+        LeaveCriticalSection(&m_csMbox);
+        MboxWake();
+        fWait = (pReq->dwFlags & VC4OVL_FLAG_WAIT) != 0;
+        break;
+
+    case VC4OVL_CMD_QUERY:
+        break;
+
+    default:
+        dwError = ERROR_INVALID_PARAMETER;
+        break;
+    }
+
+cleanUp:
+    if (pInfo != NULL) {
+        OverlayFillInfo(pInfo);
+        if (m_fOvlCreated && m_dwOvlOwner == dwCaller) {
+            DWORD i;
+            for (i = 0; i < m_dwOvlBuffers; i++) {
+                pInfo->pFrame[i] = m_pOvlOwnerVa + i * m_dwOvlFrameBytes;
+            }
+        }
+    }
+    LeaveCriticalSection(&m_csOvl);
+
+    // Wait outside the lock, so another thread of the app can go on
+    if (dwError == ERROR_SUCCESS && fWait) {
+        if (!OverlayWait(dwSeq, OVL_WAIT_MS)) dwError = ERROR_TIMEOUT;
+        if (pInfo != NULL) pInfo->dwSeqDone = m_dwOvlSeqDone;
+    }
+
+    if (dwError != ERROR_SUCCESS) {
+        SetLastError(dwError);
+        return (ULONG)-1;
+    }
+    return 1;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayCreate
+//
+//  Called with m_csOvl held. Allocates and clears the buffers, maps them
+//  into the calling process and returns the caller's frame pointers.
+//
+BOOL Vc4GPE::OverlayCreate(DWORD dwFourCC, DWORD dwWidth, DWORD dwHeight,
+    DWORD dwBuffers, BYTE **ppFrames)
+{
+    DWORD dwCaller, pitch, cpitch = 0, offset[3], frame, total, i, dwValue;
+    DWORD pa = 0;
+    HANDLE hProc;
+    BYTE *pMem, *pVa;
+
+    dwCaller = (DWORD)GetCallerVMProcessId();
+
+    // One overlay at a time: replace our own, or a dead process's
+    if (m_fOvlCreated) {
+        if (m_dwOvlOwner != dwCaller && IsProcessAlive(m_dwOvlOwner)) {
+            SetLastError(ERROR_BUSY);
+            return FALSE;
+        }
+        OverlayDestroy();
+        if (m_fOvlCreated) {
+            SetLastError(ERROR_BUSY);
+            return FALSE;
+        }
+    }
+
+    // Layout: planar 4:2:0 only. Packed 4:2:2 (YUY2 = vc_image_type 45,
+    // UYVY = 47) was tried: the firmware accepts the plane but shows nothing
+    // (Pi 1 Model B, 2026-11-25); Linux fkms does not offer it either.
+    if (dwFourCC != VC4OVL_FOURCC_YV12 && dwFourCC != VC4OVL_FOURCC_I420) {
+        RETAILMSG(1, (L"vc4disp: overlay: format 0x%08x not supported\r\n", dwFourCC));
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return FALSE;
+    }
+    if (dwWidth < 2 || dwHeight < 2 || (dwWidth & 1) != 0 || (dwHeight & 1) != 0 ||
+        dwWidth > VC4OVL_MAX_WIDTH || dwHeight > VC4OVL_MAX_HEIGHT ||
+        dwBuffers < 1 || dwBuffers > VC4OVL_MAX_BUFFERS
+    ) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    pitch = (dwWidth + 31) & ~31;
+    cpitch = pitch / 2;
+    offset[0] = 0;
+    offset[1] = pitch * dwHeight;
+    offset[2] = offset[1] + cpitch * (dwHeight / 2);
+    frame = offset[2] + cpitch * (dwHeight / 2);
+    frame = (frame + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    total = frame * dwBuffers;
+
+    // The firmware needs the display id and the framebuffer's layer
+    if (!m_fOvlDisplayKnown) {
+        if (!MailboxGetValue(TAG_GET_DISPLAY_ID, 0, &dwValue)) {
+            RETAILMSG(1, (L"vc4disp: overlay: get display id failed, using 0\r\n"));
+            dwValue = 0;
+        }
+        m_dwOvlDisplay = dwValue;
+        if (!MailboxGetValue(TAG_GET_LAYER, 0, &dwValue)) {
+            RETAILMSG(1, (L"vc4disp: overlay: get fb layer failed, assuming -127\r\n"));
+            dwValue = (DWORD)-127;
+        }
+        m_ovlLayer = (int)dwValue + 1;
+        if (m_ovlLayer > 127) m_ovlLayer = 127;
+        m_fOvlDisplayKnown = TRUE;
+    }
+
+    if (!MboxInit()) {
+        SetLastError(ERROR_GEN_FAILURE);
+        return FALSE;
+    }
+
+    pMem = (BYTE*)AllocPhysMem(total, PAGE_READWRITE | PAGE_NOCACHE, 0, 0, &pa);
+    if (pMem == NULL) {
+        RETAILMSG(1, (L"vc4disp: overlay: cannot allocate %u bytes\r\n", total));
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return FALSE;
+    }
+
+    // Black
+    for (i = 0; i < dwBuffers; i++) {
+        BYTE *pFrame = pMem + i * frame;
+        FillDwords(pFrame, offset[1], OVL_BLACK_Y);
+        FillDwords(pFrame + offset[1], frame - offset[1], OVL_BLACK_C);
+    }
+
+    // Map it into the caller, uncached. Not VirtualCopyEx with PAGE_PHYSICAL
+    // (as the RawFrameBuffer escape does for the firmware's framebuffer,
+    // which lies outside CE's RAM): for RAM pages that maps them without a
+    // page reference (kernel VMCopyPhysical, fIncRef FALSE), yet releasing
+    // the mapping (VirtualFreeEx, or the process exiting) still drops one
+    // (DecommitPages -> FreePhysPage), so FreePhysMem then freed every page
+    // a second time ("DEBUGCHK failed in physmem.c at line 1060", then
+    // "In-use page in free-list"). VirtualAllocCopyEx from our own kernel VM
+    // address locks the pages and takes a reference per page (VMAllocCopy ->
+    // VMSetPages -> DupPhysPage), so either release is balanced.
+    hProc = (HANDLE)dwCaller;
+    pVa = (BYTE*)VirtualAllocCopyEx(GetCurrentProcess(), hProc, pMem, total,
+        PAGE_READWRITE | PAGE_NOCACHE);
+    if (pVa == NULL) {
+        RETAILMSG(1, (L"vc4disp: overlay: VirtualAllocCopyEx failed (%d)\r\n",
+            GetLastError()));
+        FreePhysMem(pMem);
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return FALSE;
+    }
+
+    EnterCriticalSection(&m_csMbox);
+    m_dwOvlFourCC = dwFourCC;
+    m_dwOvlWidth = dwWidth;
+    m_dwOvlHeight = dwHeight;
+    m_dwOvlBuffers = dwBuffers;
+    m_dwOvlPitch = pitch;
+    m_dwOvlChromaPitch = cpitch;
+    m_dwOvlOffset[0] = offset[0];
+    m_dwOvlOffset[1] = offset[1];
+    m_dwOvlOffset[2] = offset[2];
+    m_dwOvlFrameBytes = frame;
+    m_pOvlMem = pMem;
+    m_dwOvlBus = BUS_UNCACHED_ALIAS | pa;
+    m_cbOvlMem = total;
+    m_dwOvlOwner = dwCaller;
+    m_pOvlOwnerVa = pVa;
+    m_fOvlShow = FALSE;
+    m_dwOvlShown = 0;
+    m_fOvlCreated = TRUE;
+    LeaveCriticalSection(&m_csMbox);
+
+    for (i = 0; i < dwBuffers; i++) ppFrames[i] = pVa + i * frame;
+
+    RETAILMSG(1, (L"vc4disp: overlay: created %ux%u %c%c%c%c x%u, pitch %u, "
+        L"%u bytes at bus 0x%08x, display %u layer %d, process 0x%08x va 0x%08x\r\n",
+        dwWidth, dwHeight,
+        (WCHAR)(dwFourCC & 0xFF), (WCHAR)((dwFourCC >> 8) & 0xFF),
+        (WCHAR)((dwFourCC >> 16) & 0xFF), (WCHAR)((dwFourCC >> 24) & 0xFF),
+        dwBuffers, pitch, total, m_dwOvlBus, m_dwOvlDisplay, m_ovlLayer,
+        dwCaller, (DWORD)pVa
+    ));
+    return TRUE;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayDestroy
+//
+//  Hides the plane, then unmaps and frees the buffers once the firmware has
+//  answered the hide. Called with m_csOvl held (or from the destructor).
+//
+VOID Vc4GPE::OverlayDestroy()
+{
+    DWORD dwSeq;
+    BOOL fHidden;
+
+    if (!m_fOvlCreated) return;
+
+    EnterCriticalSection(&m_csMbox);
+    m_fOvlShow = FALSE;
+    dwSeq = OverlayQueueLocked();
+    LeaveCriticalSection(&m_csMbox);
+    MboxWake();
+    fHidden = OverlayWait(dwSeq, OVL_DESTROY_WAIT_MS);
+
+    EnterCriticalSection(&m_csMbox);
+    m_fOvlCreated = FALSE;
+    LeaveCriticalSection(&m_csMbox);
+
+    // The owner's mapping: only if the owner is the caller (a dead process's
+    // mappings are already gone). VirtualAllocCopyEx registered the
+    // reservation at the 64 KB block base, at the same block offset as our
+    // own address. Each page holds a reference for the mapping, so if this
+    // fails the pages simply stay allocated until the process exits.
+    if (m_pOvlOwnerVa != NULL && m_dwOvlOwner == (DWORD)GetCallerVMProcessId()) {
+        BYTE *pBase = m_pOvlOwnerVa - ((DWORD)m_pOvlMem & 0xFFFF);
+        if (!VirtualFreeEx((HANDLE)m_dwOvlOwner, pBase, 0, MEM_RELEASE)) {
+            RETAILMSG(1, (L"vc4disp: overlay: VirtualFreeEx(0x%08x) failed (%d)\r\n",
+                (DWORD)pBase, GetLastError()));
+        }
+    }
+    m_pOvlOwnerVa = NULL;
+
+    if (fHidden) {
+        FreePhysMem(m_pOvlMem);
+        RETAILMSG(1, (L"vc4disp: overlay: destroyed\r\n"));
+    } else {
+        // The HVS may still be reading it: leak it rather than free it
+        RETAILMSG(1, (L"vc4disp: overlay: hide not confirmed, %u bytes at bus "
+            L"0x%08x left allocated\r\n", m_cbOvlMem, m_dwOvlBus
+        ));
+    }
+    m_pOvlMem = NULL;
+    m_dwOvlBus = 0;
+    m_cbOvlMem = 0;
+    m_dwOvlBuffers = 0;
+    m_dwOvlOwner = 0;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayQueueLocked
+//
+//  Called with m_csMbox held: marks the plane state for the mailbox thread
+//  and returns its sequence number. The caller wakes the thread after
+//  leaving the lock.
+//
+DWORD Vc4GPE::OverlayQueueLocked()
+{
+    m_dwOvlSeqQueued++;
+    m_fOvlPending = TRUE;
+    return m_dwOvlSeqQueued;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayWait
+//
+//  Waits until the firmware has answered plane update dwSeq.
+//
+BOOL Vc4GPE::OverlayWait(DWORD dwSeq, DWORD dwTimeoutMs)
+{
+    DWORD dwStart = GetTickCount();
+
+    for (;;) {
+        if ((LONG)(m_dwOvlSeqDone - dwSeq) >= 0) return TRUE;
+        if (GetTickCount() - dwStart >= dwTimeoutMs || m_hOvlDoneEvent == NULL) {
+            return FALSE;
+        }
+        // Short slices: the event is auto-reset and may wake another waiter
+        WaitForSingleObject(m_hOvlDoneEvent, 5);
+    }
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayBuildTag
+//
+//  Mailbox thread, m_csMbox held: writes the "Set plane" tag for the
+//  current overlay state at pTag (a disable when hidden, destroyed or
+//  clipped away). Returns its size in DWORDs.
+//
+DWORD Vc4GPE::OverlayBuildTag(DWORD *pTag)
+{
+    DWORD *w = &pTag[3];
+    DWORD dwFrameBus, dwType, nPlanes, planeY, planeU = 0, planeV = 0;
+    __int64 sx, sy, sw, sh, dw, dh;
+    LONG dl, dt, dr, db, cut;
+    LONG scrW = m_nScreenWidth, scrH = m_nScreenHeight;
+
+    pTag[0] = TAG_SET_PLANE;
+    pTag[1] = SET_PLANE_WORDS * sizeof(DWORD);
+    pTag[2] = 0;
+    memset(w, 0, SET_PLANE_WORDS * sizeof(DWORD));
+    w[0] = (m_dwOvlDisplay & 0xFF) | (OVL_PLANE_ID << 8);
+
+    if (!m_fOvlCreated || !m_fOvlShow) return 3 + SET_PLANE_WORDS;
+
+    // Source in 16.16, destination in screen pixels, then clip the
+    // destination to the screen and cut the source by the same fraction
+    sx = (__int64)m_rcOvlSrc.left << 16;
+    sy = (__int64)m_rcOvlSrc.top << 16;
+    sw = (__int64)(m_rcOvlSrc.right - m_rcOvlSrc.left) << 16;
+    sh = (__int64)(m_rcOvlSrc.bottom - m_rcOvlSrc.top) << 16;
+    dl = m_rcOvlDst.left;
+    dt = m_rcOvlDst.top;
+    dr = m_rcOvlDst.right;
+    db = m_rcOvlDst.bottom;
+    dw = dr - dl;
+    dh = db - dt;
+
+    if (dl >= scrW || dt >= scrH || dr <= 0 || db <= 0) {
+        return 3 + SET_PLANE_WORDS;     // entirely off screen: disable
+    }
+    if (dl < 0) {
+        cut = -dl;
+        sx += (sw * cut) / dw;
+        dl = 0;
+    }
+    if (dt < 0) {
+        cut = -dt;
+        sy += (sh * cut) / dh;
+        dt = 0;
+    }
+    if (dr > scrW) dr = scrW;
+    if (db > scrH) db = scrH;
+    // Source width/height of the visible part, from the original scale
+    sw = (sw * (dr - dl)) / dw;
+    sh = (sh * (db - dt)) / dh;
+    if (sw <= 0 || sh <= 0) return 3 + SET_PLANE_WORDS;
+
+    // Plane addresses of the buffer on screen
+    dwFrameBus = m_dwOvlBus + m_dwOvlShown * m_dwOvlFrameBytes;
+    planeY = dwFrameBus + m_dwOvlOffset[0];
+    if (m_dwOvlFourCC == VC4OVL_FOURCC_I420) {
+        dwType = VC_IMAGE_YUV420;
+        nPlanes = 3;
+        planeU = dwFrameBus + m_dwOvlOffset[1];
+        planeV = dwFrameBus + m_dwOvlOffset[2];
+    } else {
+        // YV12
+        dwType = VC_IMAGE_YUV420;
+        nPlanes = 3;
+        planeV = dwFrameBus + m_dwOvlOffset[1];
+        planeU = dwFrameBus + m_dwOvlOffset[2];
+    }
+
+    w[0] |= (dwType << 16) | (((DWORD)m_ovlLayer & 0xFF) << 24);
+    w[1] = m_dwOvlWidth | (m_dwOvlHeight << 16);
+    w[2] = m_dwOvlPitch;
+    w[3] = (DWORD)sx;
+    w[4] = (DWORD)sy;
+    w[5] = (DWORD)sw;
+    w[6] = (DWORD)sh;
+    w[7] = ((DWORD)dl & 0xFFFF) | (((DWORD)dt & 0xFFFF) << 16);
+    w[8] = ((DWORD)(dr - dl) & 0xFFFF) | (((DWORD)(db - dt) & 0xFFFF) << 16);
+    w[9] = 255 | (nPlanes << 8) | (0 << 16) | (VC_CSC_BT601 << 24);
+    w[10] = planeY;
+    w[11] = planeU;
+    w[12] = planeV;
+    w[13] = 0;
+    w[14] = 0;                          // transform
+    return 3 + SET_PLANE_WORDS;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayFillInfo
+//
+VOID Vc4GPE::OverlayFillInfo(VC4OVL_INFO *pInfo)
+{
+    memset(pInfo, 0, sizeof(*pInfo));
+    pInfo->dwSize = sizeof(*pInfo);
+
+    EnterCriticalSection(&m_csMbox);
+    if (m_fOvlCreated) {
+        pInfo->dwFourCC = m_dwOvlFourCC;
+        pInfo->dwWidth = m_dwOvlWidth;
+        pInfo->dwHeight = m_dwOvlHeight;
+        pInfo->dwBuffers = m_dwOvlBuffers;
+        pInfo->dwPitch = m_dwOvlPitch;
+        pInfo->dwChromaPitch = m_dwOvlChromaPitch;
+        pInfo->dwOffset[0] = m_dwOvlOffset[0];
+        pInfo->dwOffset[1] = m_dwOvlOffset[1];
+        pInfo->dwOffset[2] = m_dwOvlOffset[2];
+        pInfo->dwFrameBytes = m_dwOvlFrameBytes;
+        pInfo->dwShown = m_dwOvlShown;
+    }
+    pInfo->dwSeqQueued = m_dwOvlSeqQueued;
+    pInfo->dwSeqDone = m_dwOvlSeqDone;
+    pInfo->dwScreenWidth = m_nScreenWidth;
+    pInfo->dwScreenHeight = m_nScreenHeight;
+    LeaveCriticalSection(&m_csMbox);
+}
+
+//==============================================================================
+//
+//  V0 probe (registry OverlayProbe=1), verified 2026-11-25. After the first
+//  SetMode a thread waits 10 s, queries and logs the number of displays, the
+//  id of display 0 and the framebuffer's layer, then shows a 320x240 YUV420
+//  colour-bar image on plane 1 one layer above the framebuffer: stage 1 at
+//  100,100 scaled to 640x480, stage 2 at 400,200 960x540, stage 3 disabled,
+//  and (display id not 0) stages 4/5 the same on display 0. Each stage logs
+//  the tag's response. Do not run it together with the overlay escape: both
+//  use plane 1, and the probe calls the firmware synchronously.
+//
 //------------------------------------------------------------------------------
 //
 //  Function:  ProbeTag

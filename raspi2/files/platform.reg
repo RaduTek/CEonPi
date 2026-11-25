@@ -80,6 +80,10 @@ IF BSP_VC4DISP
 ; after the desktop mode is set, show a scaled YUV colour-bar test image on an
 ; HVS plane for a few stages and log each result; 0 = off. Verified 2026-11-25.
     "OverlayProbe"=dword:0
+; Overlay: 1 = answer the video overlay escape (vc4ovl.h, vc4overlay.cpp):
+; one YUV image on a hardware plane above the desktop, scaled and colour-
+; converted by the VideoCore (ovltest.exe); 0 = off.
+    "Overlay"=dword:1
 
 [HKEY_LOCAL_MACHINE\System\GDI\Drivers]
     "Display"="vc4disp.dll"

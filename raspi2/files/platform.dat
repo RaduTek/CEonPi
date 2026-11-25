@@ -29,6 +29,11 @@ IF BSP_GDIBENCH
 Directory("\Windows\Desktop"):-File("GDI Benchmark.lnk","\Windows\gdibench.lnk")
 ENDIF BSP_GDIBENCH
 
+; Video overlay test: desktop shortcut (optional, BSP_OVLTEST=1)
+IF BSP_OVLTEST
+Directory("\Windows\Desktop"):-File("Overlay Test.lnk","\Windows\ovltest.lnk")
+ENDIF BSP_OVLTEST
+
 ; Audio test: desktop shortcut (optional, BSP_AUDIOTEST=1)
 IF BSP_NOAUDIO !
 IF BSP_AUDIOTEST

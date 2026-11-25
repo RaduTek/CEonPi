@@ -24,6 +24,7 @@
 #define __VC4DISP_H
 
 #include <ddhal.h>
+#include <vc4ovl.h>
 
 #define GPE_ZONE_PDD        DEBUGZONE(14)
 
@@ -67,6 +68,9 @@
 // first SetMode, 0 (default) do not
 #define VC4DISP_REG_OVERLAYPROBE    L"OverlayProbe"
 
+// DWORD: 1 (default) answer the video overlay escape (vc4ovl.h), 0 do not
+#define VC4DISP_REG_OVERLAY         L"Overlay"
+
 // Driver settings, read from the registry by DisplayInit
 typedef struct {
     BOOL  fCachedFb;
@@ -78,6 +82,7 @@ typedef struct {
     BOOL  fRawFb;
     BOOL  fRawFbWriteCombine;
     BOOL  fOverlayProbe;
+    BOOL  fOverlay;
     DWORD dwDmaMinPixels;
     DWORD dwDmaBurst;
     DWORD dwDmaBusOffset;
@@ -171,27 +176,65 @@ private:
     DWORD* m_pHwCursorBuf;
     DWORD  m_dwHwCursorBus;
 
-    // Cursor thread: MovePointer only queues the newest position, the thread
-    // sends it to the firmware (the OAL busy-waits for the reply), at most
-    // once per m_dwCursorIntervalMs
-    CRITICAL_SECTION m_csCursor;
-    HANDLE m_hCursorThread;
-    HANDLE m_hCursorEvent;
-    BOOL   m_fCursorExit;
+    // Mailbox thread (vc4mbox.cpp): MovePointer and the overlay only queue
+    // their newest state; the thread sends it to the firmware through the
+    // OAL's asynchronous mailbox path (one message can be pending, so both
+    // share one thread and one message). Cursor moves go out at most once
+    // per m_dwCursorIntervalMs, plane updates at once. m_csMbox guards the
+    // queued cursor and overlay state.
+    CRITICAL_SECTION m_csMbox;
+    HANDLE m_hMboxThread;
+    HANDLE m_hMboxEvent;
+    BOOL   m_fMboxExit;
+    DWORD* m_pMboxMsg;              // property message, uncached
+    DWORD  m_dwMboxMsgBus;
+    BOOL   m_fMailboxAsync;         // OAL asynchronous mailbox path usable
+    volatile DWORD *m_pSysTimer;    // BCM2835 system timer (1 MHz)
+
+    // Cursor state queued for the mailbox thread
     BOOL   m_fCursorPending;
     BOOL   m_fCursorVisible;
     int    m_xCursor;
     int    m_yCursor;
     BOOL   m_fHwCursorFailed;
     DWORD  m_dwCursorIntervalMs;
-    volatile DWORD *m_pSysTimer;    // BCM2835 system timer (1 MHz)
+    DWORD  m_dwCursorLastMs;        // GetTickCount of the last cursor send
     DWORD  m_nCursorMoves;          // statistics since the last log line
     DWORD  m_nCursorCalls;
     DWORD  m_dwCursorUsTotal;
     DWORD  m_dwCursorUsMax;
-    DWORD* m_pHwCursorMsg;          // asynchronous property message, uncached
-    DWORD  m_dwHwCursorMsgBus;
-    BOOL   m_fMailboxAsync;         // OAL asynchronous mailbox path usable
+
+    // Video overlay (vc4overlay.cpp): one YUV image on an HVS plane
+    CRITICAL_SECTION m_csOvl;       // serializes the overlay escape calls
+    BOOL   m_fOverlayEnabled;       // registry Overlay
+    BOOL   m_fOvlDisplayKnown;      // display id and layer queried
+    DWORD  m_dwOvlDisplay;          // firmware display id (2 = HDMI)
+    int    m_ovlLayer;              // one above the framebuffer
+    BOOL   m_fOvlCreated;
+    DWORD  m_dwOvlFourCC;
+    DWORD  m_dwOvlWidth;
+    DWORD  m_dwOvlHeight;
+    DWORD  m_dwOvlBuffers;
+    DWORD  m_dwOvlPitch;
+    DWORD  m_dwOvlChromaPitch;
+    DWORD  m_dwOvlOffset[3];        // memory order (see vc4ovl.h)
+    DWORD  m_dwOvlFrameBytes;       // per buffer, page aligned
+    BYTE*  m_pOvlMem;               // all buffers, uncached
+    DWORD  m_dwOvlBus;
+    DWORD  m_cbOvlMem;
+    DWORD  m_dwOvlOwner;            // process id of the creator
+    BYTE*  m_pOvlOwnerVa;           // mapping in that process
+    BOOL   m_fOvlShow;
+    RECT   m_rcOvlSrc;
+    RECT   m_rcOvlDst;
+    DWORD  m_dwOvlShown;            // buffer on screen (last queued)
+    BOOL   m_fOvlPending;           // plane state waits for the thread
+    DWORD  m_dwOvlSeqQueued;
+    volatile DWORD m_dwOvlSeqDone;
+    HANDLE m_hOvlDoneEvent;
+    DWORD  m_nOvlCalls;             // statistics since the last log line
+    DWORD  m_dwOvlUsTotal;
+    DWORD  m_dwOvlUsMax;
 
     // DMA blits (vc4dma.cpp): ready once DmaInit has set up the channel
     BOOL   m_fDmaEnabled;
@@ -232,17 +275,22 @@ private:
     SCODE BltCopy24To565(GPEBltParms *pParms);
     SCODE BltInvert16(GPEBltParms *pParms);
 
-    // vc4cursor.cpp
+    // vc4mbox.cpp
     BOOL MailboxTags(DWORD *pTags, DWORD cbTags);
+    BOOL MailboxGetValue(DWORD dwTag, DWORD dwIn, DWORD *pdwValue);
+    BOOL MboxInit();
+    VOID MboxDeinit();
+    VOID MboxWake();
+    BOOL MboxSend(DWORD cbMsg);
+    VOID MboxThread();
+    static DWORD WINAPI MboxThreadProc(LPVOID pContext);
+
+    // vc4cursor.cpp
     BOOL HwCursorInit();
     BOOL HwSetPointerShape(GPESurf *pMask, int xHotspot, int yHotspot,
         int xSize, int ySize);
-    BOOL HwSetPointerState(BOOL fVisible, int x, int y);
     VOID HwQueuePointerState(BOOL fVisible, int x, int y);
-    BOOL HwSendPointerState(BOOL fVisible, int x, int y);
-    VOID HwCursorDeinit();
-    VOID CursorThread();
-    static DWORD WINAPI CursorThreadProc(LPVOID pContext);
+    DWORD HwBuildCursorTag(DWORD *pTag, BOOL fVisible, int x, int y);
 
     // vc4dma.cpp
     VOID DmaInit();
@@ -260,6 +308,14 @@ private:
     SCODE WrappedEmulatedLine(GPELineParms*);
 
     // vc4overlay.cpp
+    ULONG OverlayEscape(ULONG cjIn, PVOID pvIn, ULONG cjOut, PVOID pvOut);
+    BOOL OverlayCreate(DWORD dwFourCC, DWORD dwWidth, DWORD dwHeight,
+        DWORD dwBuffers, BYTE **ppFrames);
+    VOID OverlayDestroy();
+    DWORD OverlayQueueLocked();
+    BOOL OverlayWait(DWORD dwSeq, DWORD dwTimeoutMs);
+    DWORD OverlayBuildTag(DWORD *pTag);
+    VOID OverlayFillInfo(VC4OVL_INFO *pInfo);
     VOID OverlayProbeStart();
     VOID OverlayProbe();
     static DWORD WINAPI OverlayProbeThreadProc(LPVOID pContext);
