@@ -62,6 +62,11 @@ ULONG Vc4GPE::DrvEscape(
         ) {
             return m_fRawFbEnabled ? 1 : 0;
         }
+        if (pvIn != NULL && cjIn >= sizeof(DWORD) &&
+            *(DWORD*)pvIn == VC4OVL_ESCAPE
+        ) {
+            return m_fOverlayEnabled ? 1 : 0;
+        }
         return 0;
 
     case VC4_ESC_GETRAWFRAMEBUFFER:
@@ -71,6 +76,10 @@ ULONG Vc4GPE::DrvEscape(
             return (ULONG)-1;
         }
         return GetRawFrameBuffer((VC4_RAWFRAMEBUFFERINFO*)pvOut) ? 1 : (ULONG)-1;
+
+    case VC4OVL_ESCAPE:
+        // Video overlay (vc4overlay.cpp, interface in vc4ovl.h)
+        return OverlayEscape(cjIn, pvIn, cjOut, pvOut);
     }
 
     return GPE::DrvEscape(pso, iEsc, cjIn, pvIn, cjOut, pvOut);

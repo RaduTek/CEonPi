@@ -414,6 +414,70 @@ ARM1176.
   investigated: the System control panel never showed the CPU speed (`OALIoCtlProcessorInfo` fills
   `dwClockSpeed`). Also seen:
   `VirtualProtectEx` `PAGE_WRITECOMBINE` fails, so the RawFrameBuffer mapping stays uncached.
+- **Video overlay (HVS plane), started 2026-11-25, branch `vc4-overlay`.** Plan: hardware-scaled YUV
+  overlay through the firmware's **"Set plane" property tag `0x00048015`** (the Linux fkms driver's
+  interface; no VCHIQ), then a DirectDraw (DDGPE) overlay for TCPMP. Plan file:
+  `~/.claude/plans/playful-twirling-rossum-of-6b25473e-15ff-4757-85fa-3255c3f4c960.md`.
+  Message: 60-byte `set_plane` (display, plane_id, vc_image_type, s8 layer; width, height, pitch,
+  vpitch; src x/y/w/h 16.16; dst x/y/w/h; alpha, num_planes, is_vu, color_encoding; planes[4] bus
+  addresses; transform); disable = same tag with only display + plane_id. Types: YUV420 planar 3,
+  YUYV 45, UYVY 47, NV12 52, RGB565 1. Chroma pitch is implied (luma pitch / 2).
+  **V0 probe verified (2026-11-25, Pi 1 Model B, firmware Nov 2 2026)** (`vc4overlay.cpp`, registry
+  `OverlayProbe`): the tag works **alongside the legacy mailbox framebuffer**, no fkms mode needed.
+  `GET_NUM_DISPLAYS` (0x00040013) = 1, `GET_DISPLAY_ID` (0x00040016, index 0) = **2 (HDMI)**,
+  `FRAMEBUFFER_GET_LAYER` (0x0004000c) = **-127**. A 320x240 YUV420 plane (BT.601, `color_encoding` 1,
+  Y/U/V contiguous, bus `0xC0000000 | pa`, uncached) on **display 2, plane_id 1, layer -126** showed
+  above the desktop, scaled smoothly to 640x480 and 960x540, moved, and disappeared on disable;
+  colours correct (U/V order right); the hardware cursor stays on top; desktop unaffected.
+  **Display 0 shows nothing**: use the id from `GET_DISPLAY_ID`. The tag's req/resp word comes back
+  **0x00000000** (no response bit) even when it works, so `MailboxTags`' per-tag response check must
+  not be applied to Set plane; the value words come back unchanged.
+  **V1 overlay engine verified (2026-11-25, Pi 1 Model B)** with `ovltest.exe` (`src\apps\ovltest`,
+  `BSP_OVLTEST`): private escape `VC4OVL_ESCAPE` (`src\INC\vc4ovl.h`: CREATE/DESTROY/SHOW/FLIP/QUERY,
+  1-3 buffers mapped into the caller, sequence numbers, `VC4OVL_FLAG_WAIT`), engine in
+  `vc4overlay.cpp`, and the cursor thread generalized into a **mailbox thread** (`vc4mbox.cpp`) that
+  sends the newest cursor state and the newest plane state in one asynchronous message (the OAL tracks
+  only one pending async message). Measured: plane update ~1.8-1.9 ms (async, sleeping), 640x360 YV12
+  scaled to 1920x1080 at 30 fps with **74-75% idle**; unpaced flips reach ~330/s. YV12 and I420, moving
+  window and clipping (driver clips dst to the screen, cuts src in 16.16) all correct; cursor stays on
+  top. **Packed YUY2 (type 45) / UYVY (47): firmware accepts the plane but shows nothing** (fkms does
+  not offer them either), so the overlay is planar 4:2:0 only. **The firmware's reply does not mean the
+  HVS has left the old buffer:** at 330 flips/s there was heavy tearing; at 30 fps 2 or 3 buffers
+  show none or almost none. Reuse a buffer only after a refresh has passed (3 buffers at video rates).
+  **Kernel trap (verified in `Z:\private\winceos\coreos\nk\kernel\vm.c`):** `VirtualCopyEx` with
+  `PAGE_PHYSICAL` maps *RAM* pages **without** a page reference (`VMCopyPhysical`, `fIncRef` FALSE), but
+  releasing the mapping (`VirtualFreeEx`, or the process exiting) still calls `FreePhysPage`. With
+  `AllocPhysMem` memory that double-frees every page (`DEBUGCHK failed in physmem.c at line 1060`,
+  then `VerifyPhysmemList: In-use page in free-list`, idle stuck at 0%). Map driver RAM into a process
+  with `VirtualAllocCopyEx(GetCurrentProcess(), hDst, kernelVa, cb, prot)` instead (locks the pages
+  and takes a reference: `VMAllocCopy` -> `VMSetPages` -> `DupPhysPage`); release with `VirtualFreeEx`
+  at the 64 KB block base. RawFrameBuffer's `PAGE_PHYSICAL` mapping is safe only because the
+  firmware framebuffer lies outside CE's RAM.
+  **V2a DirectDraw base verified (2026-11-25):** `Vc4GPE` derives from **DDGPE** (`ddgpe.lib` before
+  `gpe.lib`; exports `HALInit`; `ddgpe.lib` supplies `RegisterDDHALAPI`/`GetDDGPE`), primary is a
+  `DDGPESurf`, HAL in `vc4hal.cpp` (modelled on Microsoft's vgaflat). `BSP_VC4DISP` adds `SYSGEN_DDRAW`
+  (`cebasecesysgen.bat`). `ddraw.dll` loads lazily: the HAL line appears when an app first uses
+  DirectDraw, not at GWES start. Video memory is reported as the driver's own uncached
+  `VirtualAlloc`+`VirtualCopy(PAGE_PHYSICAL)` view of the framebuffer (as every shipping CE 7 DDGPE
+  driver does; `HalLock` moves primary pointers from GDI's cached static view into it). The CE 7
+  runtime only queried the Misc/ColorControl/VideoPort callback GUIDs (declined) and never the video
+  memory list. **TCPMP on CE 7:** CE 6+ reuse the desktop `IID_IDirectDraw` (`6C14DB80-...`), so
+  TCPMP took its desktop DirectDraw path and the debug ddraw raised `0x57`; CE 7's `DDCAPS` also has
+  4 extra video-port DWORDs. Fixed in `Y:\TCPMP` (`common\overlay`: always the CE path on CE, CE 6
+  IID fallback, CE 6 `DDCAPS` size with old-size retry). Without an overlay TCPMP deliberately falls
+  back to RawFrameBuffer (`overlay_ddrawce.c`: blit mode + `dwVidMemTotal`==0 + raw available).
+  **V2b DirectDraw YV12 overlay verified (2026-11-25, Pi 1 Model B, TCPMP):** `vc4ddovl.cpp`. Every
+  YV12 DirectDraw surface is a `Vc4OvlSurf` (own `AllocPhysMem` buffer, Y/V/U, luma pitch multiple of
+  32, mapped into the client with `VirtualAllocCopyEx`, PACSurf pattern; not "video memory").
+  Callbacks UpdateOverlay / SetOverlayPosition / Flip (shows the target, waits for the firmware) /
+  GetFlipStatus on the shared plane engine (plane state = Y/U/V bus addresses + owner escape or
+  DirectDraw). Caps `OVERLAYSUPPORT|FLIP|FOURCC`, FourCC YV12, stretch 250-16000, nominal 16 MB
+  `dwVidMemFree`. Result: 360p MPEG-4 scaled to 1080p plays smoothly, no tearing (2-buffer flip
+  chain), CPU ~75% (60-80%) vs 100% and heavy tearing with RawFrameBuffer; full-screen toggle resizes
+  the overlay; cleared on exit. **Accepted limitation (user, 2026-11-25):** no colour key, so windows
+  over the video area are hidden by the plane (options if revisited: hide/crop the plane when covered,
+  or a 32 bpp desktop with alpha above the video plane). TCPMP Debug-kernel noise:
+  `Virtual free failure!!! addr: 0x00000000` is TCPMP's `FreeBlock` freeing an empty block.
 - **Future goal (user, 2026-11-23): VCHIQ.** The real video acceleration path: HVS YUV planes
   (hardware scaling and colour conversion through dispmanx) and hardware decode (MMAL/OpenMAX) are
   only reachable through the firmware's VCHIQ interface, not the mailbox. A DirectDraw overlay would

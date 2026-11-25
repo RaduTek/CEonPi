@@ -1,0 +1,17 @@
+# Video overlay test (src\apps\ovltest, ovltest.exe).
+#
+# Animates a 640x360 YUV image on vc4disp's hardware overlay plane (escape
+# interface in src\INC\vc4ovl.h) and reports frame rate and idle time.
+# Included in the image only when BSP_OVLTEST=1 (catalog item "Video
+# overlay test (ovltest.exe)"). Needs GWES and the vc4disp display driver.
+
+TARGETNAME=ovltest
+TARGETTYPE=PROGRAM
+EXEENTRY=WinMainCRTStartup
+
+TARGETLIBS= \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib \
+    $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\corelibc.lib \
+
+SOURCES= \
+    ovltest.cpp

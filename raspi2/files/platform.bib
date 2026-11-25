@@ -161,6 +161,13 @@ IF BSP_GDIBENCH
     gdibench.exe       $(_FLATRELEASEDIR)\gdibench.exe                 NK
 ENDIF BSP_GDIBENCH
 
+; Video overlay test (src\apps\ovltest): animates a YUV image on vc4disp's
+; hardware overlay plane. Optional: set BSP_OVLTEST=1 (catalog item "Video
+; overlay test (ovltest.exe)"). platform.dat puts a shortcut on the desktop.
+IF BSP_OVLTEST
+    ovltest.exe        $(_FLATRELEASEDIR)\ovltest.exe                  NK
+ENDIF BSP_OVLTEST
+
 ; Audio test (src\apps\audiotest): waveOut tones and PlaySound. Optional:
 ; set BSP_AUDIOTEST=1 (catalog item "Audio test (audiotest.exe)").
 ; platform.dat puts a shortcut on the desktop.
@@ -249,6 +256,9 @@ ENDIF BSP_POWEROFF
 IF BSP_GDIBENCH
     gdibench.lnk $(_FLATRELEASEDIR)\gdibench.lnk		  NK	SH
 ENDIF BSP_GDIBENCH
+IF BSP_OVLTEST
+    ovltest.lnk $(_FLATRELEASEDIR)\ovltest.lnk		  NK	SH
+ENDIF BSP_OVLTEST
 ; @CESYSGEN IF CE_MODULES_WAVEAPI
 IF BSP_NOAUDIO !
 IF BSP_AUDIOTEST

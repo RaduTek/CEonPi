@@ -46,6 +46,10 @@ if "%BSP_SDOFFLOAD%"=="1" set SYSGEN_MSPART=1
 if "%BSP_AUDIO%"=="1" set SYSGEN_AUDIO=1
 if "%BSP_AUDIOTEST%"=="1" set SYSGEN_AUDIO=1
 
+@REM "Display: VideoCore IV (vc4disp)": DirectDraw (the driver is a DDGPE: the
+@REM DirectDraw primary now, the hardware video overlay next)
+if "%BSP_VC4DISP%"=="1" set SYSGEN_DDRAW=1
+
 @REM "Volume tray icon (voltray.exe)": Waveform Audio, Common Control (trackbar),
 @REM Standard Shell (taskbar notification area)
 if "%BSP_VOLTRAY%"=="1" set SYSGEN_AUDIO=1

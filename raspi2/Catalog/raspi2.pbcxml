@@ -26,6 +26,7 @@
     <BspItemId>Item:CEonPi:Vc4Disp:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:RaspiDisplay:raspi2</BspItemId>
     <BspItemId>Item:CEonPi:GdiBench:raspi2</BspItemId>
+    <BspItemId>Item:CEonPi:OvlTest:raspi2</BspItemId>
   </Bsp>
   <Item Id="Item:CEonPi:IdleMon:raspi2">
     <Title>CPU Idle Monitor (demo)</Title>
@@ -58,6 +59,17 @@
     <SourceCode>
       <Title>GDI BENCHMARK SOURCE CODE</Title>
       <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\GDIBENCH</Path>
+    </SourceCode>
+  </Item>
+  <Item Id="Item:CEonPi:OvlTest:raspi2">
+    <Title>Video overlay test (ovltest.exe)</Title>
+    <Description>Full-screen app with a desktop shortcut that animates a YUV image on the vc4disp hardware video overlay (scaled and colour-converted by the VideoCore) in six phases: YV12 and I420, double and triple buffering, a moving window and clipping. Results are shown on screen and in the debug output (lines starting with "ovltest:"). Needs the vc4disp display driver. Sets BSP_OVLTEST=1.</Description>
+    <Type>BspSpecific</Type>
+    <Variable>BSP_OVLTEST</Variable>
+    <Location>Applications</Location>
+    <SourceCode>
+      <Title>VIDEO OVERLAY TEST SOURCE CODE</Title>
+      <Path>$(_WINCEROOT)\PLATFORM\RASPI2\SRC\APPS\OVLTEST</Path>
     </SourceCode>
   </Item>
   <Item Id="Item:CEonPi:SdRoot:raspi2">

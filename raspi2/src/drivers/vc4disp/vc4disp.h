@@ -24,6 +24,9 @@
 #define __VC4DISP_H
 
 #include <ddhal.h>
+#include <ddrawi.h>
+#include <ddgpe.h>
+#include <vc4ovl.h>
 
 #define GPE_ZONE_PDD        DEBUGZONE(14)
 
@@ -63,6 +66,13 @@
 #define VC4DISP_REG_RAWFB           L"RawFrameBuffer"
 #define VC4DISP_REG_RAWFBWC         L"RawFbWriteCombine"
 
+// DWORD: 1 = run the HVS overlay plane probe (vc4overlay.cpp) after the
+// first SetMode, 0 (default) do not
+#define VC4DISP_REG_OVERLAYPROBE    L"OverlayProbe"
+
+// DWORD: 1 (default) answer the video overlay escape (vc4ovl.h), 0 do not
+#define VC4DISP_REG_OVERLAY         L"Overlay"
+
 // Driver settings, read from the registry by DisplayInit
 typedef struct {
     BOOL  fCachedFb;
@@ -73,6 +83,8 @@ typedef struct {
     BOOL  fDmaCopy;
     BOOL  fRawFb;
     BOOL  fRawFbWriteCombine;
+    BOOL  fOverlayProbe;
+    BOOL  fOverlay;
     DWORD dwDmaMinPixels;
     DWORD dwDmaBurst;
     DWORD dwDmaBusOffset;
@@ -100,6 +112,11 @@ typedef struct {
     DWORD reserved[2];
 } VC4_DMA_CB;
 
+// Who owns the overlay plane (m_dwOvlUser)
+#define OVL_USER_NONE               0
+#define OVL_USER_ESCAPE             1   // VC4OVL_ESCAPE (ovltest)
+#define OVL_USER_DDRAW              2   // DirectDraw overlay surfaces
+
 // CE ARM static mappings: uncached view = cached view + 0x20000000
 #define VC4DISP_STATIC_CACHED       0x80000000
 #define VC4DISP_STATIC_UNCACHED     0xA0000000
@@ -108,7 +125,15 @@ typedef struct {
 
 //------------------------------------------------------------------------------
 
-class Vc4GPE : public GPE
+class Vc4OvlSurf;
+
+// vc4overlay.cpp: TRUE while the process exists
+BOOL Vc4IsProcessAlive(DWORD dwProcessId);
+
+// DDGPE (DirectDraw-capable GPE, ddgpe.lib). Without DirectDraw in the OS
+// design it behaves exactly like the GPE driver it was; with it, GWES calls
+// HALInit (vc4hal.cpp) and DirectDraw uses the framebuffer as its primary.
+class Vc4GPE : public DDGPE
 {
 
 public:
@@ -121,6 +146,26 @@ public:
     virtual SCODE SetPalette(const PALETTEENTRY*, WORD, WORD);
 
     virtual SCODE AllocSurface(GPESurf**, int, int, EGPEFormat, int);
+    virtual SCODE AllocSurface(DDGPESurf**, int, int, EGPEFormat,
+        EDDGPEPixelFormat, int);
+
+    // vc4hal.cpp: DirectDraw's own view of the framebuffer (its one video
+    // memory block), Lock pointer translation into it, and the cache rule
+    // once a client may write it
+    VOID DdFbViewInit(DWORD dwFbPhys, DWORD cb);
+    VOID GetVirtualVideoMemory(ULONG *pVirtualBase, ULONG *pSize);
+    VOID *DdLockPointer(DDGPESurf *pSurf, VOID *p);
+    VOID DirectDrawOpened();
+
+    // vc4ddovl.cpp: DirectDraw overlay on the HVS plane (the escape's engine)
+    HRESULT DdOverlayShow(Vc4OvlSurf *pSurf, const RECT *prcSrc,
+        const RECT *prcDst);
+    HRESULT DdOverlayUpdate(Vc4OvlSurf *pSurf, const RECT *prcSrc,
+        const RECT *prcDst);
+    HRESULT DdOverlayHide();
+    HRESULT DdOverlayFlip(Vc4OvlSurf *pTarget);
+    HRESULT DdOverlayMove(LONG x, LONG y);
+    BOOL DdOverlaySurfaceGone(Vc4OvlSurf *pSurf);
     virtual SCODE Line(GPELineParms*, EGPEPhase);
     virtual SCODE BltPrepare(GPEBltParms*);
     virtual SCODE BltComplete(GPEBltParms*);
@@ -166,27 +211,76 @@ private:
     DWORD* m_pHwCursorBuf;
     DWORD  m_dwHwCursorBus;
 
-    // Cursor thread: MovePointer only queues the newest position, the thread
-    // sends it to the firmware (the OAL busy-waits for the reply), at most
-    // once per m_dwCursorIntervalMs
-    CRITICAL_SECTION m_csCursor;
-    HANDLE m_hCursorThread;
-    HANDLE m_hCursorEvent;
-    BOOL   m_fCursorExit;
+    // Mailbox thread (vc4mbox.cpp): MovePointer and the overlay only queue
+    // their newest state; the thread sends it to the firmware through the
+    // OAL's asynchronous mailbox path (one message can be pending, so both
+    // share one thread and one message). Cursor moves go out at most once
+    // per m_dwCursorIntervalMs, plane updates at once. m_csMbox guards the
+    // queued cursor and overlay state.
+    CRITICAL_SECTION m_csMbox;
+    HANDLE m_hMboxThread;
+    HANDLE m_hMboxEvent;
+    BOOL   m_fMboxExit;
+    DWORD* m_pMboxMsg;              // property message, uncached
+    DWORD  m_dwMboxMsgBus;
+    BOOL   m_fMailboxAsync;         // OAL asynchronous mailbox path usable
+    volatile DWORD *m_pSysTimer;    // BCM2835 system timer (1 MHz)
+
+    // Cursor state queued for the mailbox thread
     BOOL   m_fCursorPending;
     BOOL   m_fCursorVisible;
     int    m_xCursor;
     int    m_yCursor;
     BOOL   m_fHwCursorFailed;
     DWORD  m_dwCursorIntervalMs;
-    volatile DWORD *m_pSysTimer;    // BCM2835 system timer (1 MHz)
+    DWORD  m_dwCursorLastMs;        // GetTickCount of the last cursor send
     DWORD  m_nCursorMoves;          // statistics since the last log line
     DWORD  m_nCursorCalls;
     DWORD  m_dwCursorUsTotal;
     DWORD  m_dwCursorUsMax;
-    DWORD* m_pHwCursorMsg;          // asynchronous property message, uncached
-    DWORD  m_dwHwCursorMsgBus;
-    BOOL   m_fMailboxAsync;         // OAL asynchronous mailbox path usable
+
+    // Video overlay (vc4overlay.cpp): one YUV image on an HVS plane
+    CRITICAL_SECTION m_csOvl;       // serializes the overlay escape calls
+    BOOL   m_fOverlayEnabled;       // registry Overlay
+    BOOL   m_fOvlDisplayKnown;      // display id and layer queried
+    DWORD  m_dwOvlDisplay;          // firmware display id (2 = HDMI)
+    int    m_ovlLayer;              // one above the framebuffer
+    BOOL   m_fOvlCreated;
+    DWORD  m_dwOvlFourCC;
+    DWORD  m_dwOvlWidth;
+    DWORD  m_dwOvlHeight;
+    DWORD  m_dwOvlBuffers;
+    DWORD  m_dwOvlPitch;
+    DWORD  m_dwOvlChromaPitch;
+    DWORD  m_dwOvlOffset[3];        // memory order (see vc4ovl.h)
+    DWORD  m_dwOvlFrameBytes;       // per buffer, page aligned
+    BYTE*  m_pOvlMem;               // all buffers, uncached
+    DWORD  m_dwOvlBus;
+    DWORD  m_cbOvlMem;
+    DWORD  m_dwOvlOwner;            // process id of the creator
+    BYTE*  m_pOvlOwnerVa;           // mapping in that process
+    DWORD  m_dwOvlUser;             // OVL_USER_xxx: who owns the plane
+    BOOL   m_fOvlShow;
+    RECT   m_rcOvlSrc;
+    RECT   m_rcOvlDst;
+    DWORD  m_dwOvlShown;            // escape: buffer on screen (last queued)
+
+    // Plane image (OverlayBuildTag): planar 4:2:0, set by the escape's
+    // CREATE/FLIP or by DirectDraw's UpdateOverlay/Flip
+    DWORD  m_dwOvlBusY;
+    DWORD  m_dwOvlBusU;
+    DWORD  m_dwOvlBusV;
+    DWORD  m_dwPlaneWidth;
+    DWORD  m_dwPlaneHeight;
+    DWORD  m_dwPlanePitch;
+    Vc4OvlSurf *m_pOvlDdSurf;   // DirectDraw: surface on screen
+    BOOL   m_fOvlPending;           // plane state waits for the thread
+    DWORD  m_dwOvlSeqQueued;
+    volatile DWORD m_dwOvlSeqDone;
+    HANDLE m_hOvlDoneEvent;
+    DWORD  m_nOvlCalls;             // statistics since the last log line
+    DWORD  m_dwOvlUsTotal;
+    DWORD  m_dwOvlUsMax;
 
     // DMA blits (vc4dma.cpp): ready once DmaInit has set up the channel
     BOOL   m_fDmaEnabled;
@@ -213,6 +307,14 @@ private:
     BOOL   m_fRawFbWriteCombine;
     BOOL   m_fRawFbGiven;
 
+    // DirectDraw's uncached VirtualCopy view of the framebuffer (vc4hal.cpp)
+    BYTE*  m_pDdFbView;
+    DWORD  m_cbDdFbView;
+
+    // HVS overlay plane probe (vc4overlay.cpp)
+    BOOL   m_fOverlayProbe;
+    BOOL   m_fOverlayProbeStarted;
+
     // Helper functions
     UINT8* QueryModeInfo(int modeNumber);
     VOID FlushRect(const RECTL *pRect);
@@ -223,17 +325,22 @@ private:
     SCODE BltCopy24To565(GPEBltParms *pParms);
     SCODE BltInvert16(GPEBltParms *pParms);
 
-    // vc4cursor.cpp
+    // vc4mbox.cpp
     BOOL MailboxTags(DWORD *pTags, DWORD cbTags);
+    BOOL MailboxGetValue(DWORD dwTag, DWORD dwIn, DWORD *pdwValue);
+    BOOL MboxInit();
+    VOID MboxDeinit();
+    VOID MboxWake();
+    BOOL MboxSend(DWORD cbMsg);
+    VOID MboxThread();
+    static DWORD WINAPI MboxThreadProc(LPVOID pContext);
+
+    // vc4cursor.cpp
     BOOL HwCursorInit();
     BOOL HwSetPointerShape(GPESurf *pMask, int xHotspot, int yHotspot,
         int xSize, int ySize);
-    BOOL HwSetPointerState(BOOL fVisible, int x, int y);
     VOID HwQueuePointerState(BOOL fVisible, int x, int y);
-    BOOL HwSendPointerState(BOOL fVisible, int x, int y);
-    VOID HwCursorDeinit();
-    VOID CursorThread();
-    static DWORD WINAPI CursorThreadProc(LPVOID pContext);
+    DWORD HwBuildCursorTag(DWORD *pTag, BOOL fVisible, int x, int y);
 
     // vc4dma.cpp
     VOID DmaInit();
@@ -249,6 +356,51 @@ private:
     VOID CursorOn();
     VOID CursorOff();
     SCODE WrappedEmulatedLine(GPELineParms*);
+
+    // vc4overlay.cpp
+    ULONG OverlayEscape(ULONG cjIn, PVOID pvIn, ULONG cjOut, PVOID pvOut);
+    BOOL OverlayCreate(DWORD dwFourCC, DWORD dwWidth, DWORD dwHeight,
+        DWORD dwBuffers, BYTE **ppFrames);
+    VOID OverlayDestroy();
+    DWORD OverlayQueueLocked();
+    BOOL OverlayWait(DWORD dwSeq, DWORD dwTimeoutMs);
+    DWORD OverlayBuildTag(DWORD *pTag);
+    VOID OverlayFillInfo(VC4OVL_INFO *pInfo);
+    VOID OverlayDisplayInit();
+    VOID OverlayEscapeBufferLocked(DWORD dwBuffer);
+    VOID OverlayProbeStart();
+    VOID OverlayProbe();
+    static DWORD WINAPI OverlayProbeThreadProc(LPVOID pContext);
+};
+
+//------------------------------------------------------------------------------
+//
+//  Vc4OvlSurf (vc4ddovl.cpp): a DirectDraw YV12 overlay surface. Its own
+//  physically contiguous uncached buffer, mapped into the creating process
+//  with VirtualAllocCopyEx (each page referenced, like SMDK6410's PACSurf),
+//  so Buffer() and Lock pointers are that process's addresses. Not in video
+//  memory as far as DirectDraw is concerned.
+//
+class Vc4OvlSurf : public DDGPESurf
+{
+public:
+    static SCODE Create(int width, int height, EDDGPEPixelFormat pixelFormat,
+        DDGPESurf **ppSurf);
+    virtual ~Vc4OvlSurf();
+
+    DWORD m_dwBusY;         // plane bus addresses (uncached alias)
+    DWORD m_dwBusU;
+    DWORD m_dwBusV;
+    DWORD m_dwPitch;        // luma pitch; chroma pitch is half
+
+private:
+    Vc4OvlSurf(int width, int height, BYTE *pBits, int stride,
+        EDDGPEPixelFormat pixelFormat);
+
+    BYTE  *m_pKernel;       // AllocPhysMem view
+    DWORD  m_cbAlloc;
+    DWORD  m_dwOwner;       // process the buffer is mapped into (0 = ours)
+    BYTE  *m_pOwnerVa;
 };
 
 //------------------------------------------------------------------------------
