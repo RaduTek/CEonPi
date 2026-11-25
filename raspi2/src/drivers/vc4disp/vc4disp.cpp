@@ -33,6 +33,10 @@
 //  OAL console, so the cached copy never goes stale. Registry value
 //  CachedFrameBuffer=0 restores the old uncached drawing (for comparison).
 //
+//  V2a: the driver is a DDGPE (ddgpe.lib) so DirectDraw can run on it; the
+//  primary surface is a DDGPESurf and vc4hal.cpp is the DirectDraw HAL. With
+//  no DirectDraw in the OS design nothing changes for GDI.
+//
 //  Changes from raspiBasic_ddi: no MmUnmapIoSpace on a buffer that was never
 //  mapped, the mode-info buffer is no longer leaked by SetMode and is zeroed
 //  (the colour masks were read from uninitialised memory for 24/32 bpp), and
@@ -180,12 +184,8 @@ ULONG *APIENTRY DrvGetMasks(DHPDEV dhpdev)
 }
 
 //------------------------------------------------------------------------------
-//
-//  Function:  RegisterDDHALAPI
-//
-VOID RegisterDDHALAPI()
-{
-}
+// RegisterDDHALAPI and GetDDGPE come from ddgpe.lib; HALInit (exported in
+// vc4disp.def) too, and it calls buildDDHALInfo in vc4hal.cpp.
 
 //------------------------------------------------------------------------------
 //
@@ -289,6 +289,8 @@ Vc4GPE::Vc4GPE(const VC4DISP_SETTINGS *pSettings)
     m_fRawFbEnabled = pSettings->fRawFb;
     m_fRawFbWriteCombine = pSettings->fRawFbWriteCombine;
     m_fRawFbGiven = FALSE;
+    m_pDdFbView = NULL;
+    m_cbDdFbView = 0;
     m_fOverlayProbe = pSettings->fOverlayProbe;
     m_fOverlayProbeStarted = FALSE;
 }
@@ -313,6 +315,10 @@ Vc4GPE::~Vc4GPE()
     if (m_hOvlDoneEvent != NULL) {
         CloseHandle(m_hOvlDoneEvent);
         m_hOvlDoneEvent = NULL;
+    }
+    if (m_pDdFbView != NULL) {
+        VirtualFree(m_pDdFbView, 0, MEM_RELEASE);
+        m_pDdFbView = NULL;
     }
     DeleteCriticalSection(&m_csMbox);
     DeleteCriticalSection(&m_csOvl);
@@ -456,6 +462,7 @@ SCODE Vc4GPE::SetMode(int modeNumber, HPALETTE *pPalette)
     m_gpeMode.frequency = pInfo->frequency;
     m_gpeMode.format    = (EGPEFormat)pInfo->format;
     m_pMode = &m_gpeMode;
+    m_dwPhysicalModeID = modeNumber;    // DDGPE: mode of the DirectDraw primary
     m_nScreenWidth  = m_pMode->width;
     m_nScreenHeight = m_pMode->height;
 
@@ -482,9 +489,11 @@ SCODE Vc4GPE::SetMode(int modeNumber, HPALETTE *pPalette)
         }
     }
 
-    m_pPrimarySurface = new GPESurf(
+    // A DDGPESurf, so DirectDraw can use it as its primary surface
+    m_pPrimarySurface = new DDGPESurf(
         m_pMode->width, m_pMode->height, (VOID*)ulFrame,
-        pInfo->frameStride, m_pMode->format
+        pInfo->frameStride, m_pMode->format,
+        EGPEFormatToEDDGPEPixelFormat[m_pMode->format]
     );
     if (m_pPrimarySurface == NULL) {
         DEBUGMSG(GPE_ZONE_ERROR, (L"Vc4GPE::SetMode: "
@@ -525,6 +534,10 @@ SCODE Vc4GPE::SetMode(int modeNumber, HPALETTE *pPalette)
         pInfo->frameStride, ulFrame, m_fCachedFb ? L"cached" : L"uncached"
     ));
 
+    // DirectDraw's own view of the framebuffer (vc4hal.cpp); the static
+    // views map physical 0x00000000-0x1FFFFFFF at 0x80000000 / 0xA0000000
+    DdFbViewInit(ulFrame & 0x1FFFFFFF, pInfo->frameStride * m_gpeMode.height);
+
     // DMA blits need the framebuffer address, so they start here
     if (m_fDmaEnabled && !m_fDmaReady) DmaInit();
 
@@ -561,6 +574,36 @@ SCODE Vc4GPE::AllocSurface(
         DEBUGMSG(GPE_ZONE_ERROR, (L"Vc4GPE::AllocSurface: "
             L"Failed to allocate surface (width: %d, height: %d, format %d)\r\n",
             width, height, format
+        ));
+        delete *ppSurf; *ppSurf = NULL;
+        return E_OUTOFMEMORY;
+    }
+
+    return S_OK;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  AllocSurface (DDGPE)
+//
+//  DirectDraw surfaces (DDGPECreateSurface). No video memory yet (V2a), so
+//  only system-memory surfaces; GDI keeps using the GPESurf version above.
+//
+SCODE Vc4GPE::AllocSurface(
+    DDGPESurf **ppSurf, int width, int height, EGPEFormat format,
+    EDDGPEPixelFormat pixelFormat, int flags
+) {
+    DWORD stride;
+
+    *ppSurf = NULL;
+    if ((flags & GPE_REQUIRE_VIDEO_MEMORY) != 0) return DDERR_OUTOFVIDEOMEMORY;
+
+    stride = ((EGPEFormatToBpp[format] * width + 31) >> 5) << 2;
+    *ppSurf = new DDGPESurf(width, height, stride, format, pixelFormat);
+    if (*ppSurf == NULL || (*ppSurf)->Buffer() == NULL) {
+        DEBUGMSG(GPE_ZONE_ERROR, (L"Vc4GPE::AllocSurface: "
+            L"Failed to allocate DirectDraw surface (%dx%d, format %d/%d)\r\n",
+            width, height, format, pixelFormat
         ));
         delete *ppSurf; *ppSurf = NULL;
         return E_OUTOFMEMORY;

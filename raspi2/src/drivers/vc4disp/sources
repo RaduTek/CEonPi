@@ -11,7 +11,7 @@ see the LICENSE.RTF on your install media or the root of your tools installation
 THE SAMPLE SOURCE CODE IS PROVIDED "AS IS", WITH NO WARRANTIES OR INDEMNITIES.
 !endif
 
-# vc4disp.dll: VideoCore IV display driver (GPE). Catalog item
+# vc4disp.dll: VideoCore IV display driver (DDGPE). Catalog item
 # "Display: VideoCore IV (vc4disp)", BSP_VC4DISP=1.
 
 TARGETNAME=vc4disp
@@ -27,10 +27,16 @@ SOURCES=\
     vc4mbox.cpp \
     vc4dma.cpp \
     vc4escape.cpp \
-    vc4overlay.cpp
+    vc4overlay.cpp \
+    vc4hal.cpp
 
 TARGETLIBS= \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\coredll.lib
 
-SOURCELIBS=$(_DDGUID) $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\gpe.lib
+# ddgpe.lib (DirectDraw-capable GPE: HALInit, DDGPExxx callbacks) before
+# gpe.lib, as in the vgaflat sample
+SOURCELIBS= \
+    $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\ddgpe.lib \
+    $(_DDGUID) \
+    $(_PUBLICROOT)\common\oak\lib\$(_CPUINDPATH)\gpe.lib

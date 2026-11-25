@@ -24,6 +24,8 @@
 #define __VC4DISP_H
 
 #include <ddhal.h>
+#include <ddrawi.h>
+#include <ddgpe.h>
 #include <vc4ovl.h>
 
 #define GPE_ZONE_PDD        DEBUGZONE(14)
@@ -118,7 +120,10 @@ typedef struct {
 
 //------------------------------------------------------------------------------
 
-class Vc4GPE : public GPE
+// DDGPE (DirectDraw-capable GPE, ddgpe.lib). Without DirectDraw in the OS
+// design it behaves exactly like the GPE driver it was; with it, GWES calls
+// HALInit (vc4hal.cpp) and DirectDraw uses the framebuffer as its primary.
+class Vc4GPE : public DDGPE
 {
 
 public:
@@ -131,6 +136,16 @@ public:
     virtual SCODE SetPalette(const PALETTEENTRY*, WORD, WORD);
 
     virtual SCODE AllocSurface(GPESurf**, int, int, EGPEFormat, int);
+    virtual SCODE AllocSurface(DDGPESurf**, int, int, EGPEFormat,
+        EDDGPEPixelFormat, int);
+
+    // vc4hal.cpp: DirectDraw's own view of the framebuffer (its one video
+    // memory block), Lock pointer translation into it, and the cache rule
+    // once a client may write it
+    VOID DdFbViewInit(DWORD dwFbPhys, DWORD cb);
+    VOID GetVirtualVideoMemory(ULONG *pVirtualBase, ULONG *pSize);
+    VOID *DdLockPointer(DDGPESurf *pSurf, VOID *p);
+    VOID DirectDrawOpened();
     virtual SCODE Line(GPELineParms*, EGPEPhase);
     virtual SCODE BltPrepare(GPEBltParms*);
     virtual SCODE BltComplete(GPEBltParms*);
@@ -260,6 +275,10 @@ private:
     BOOL   m_fRawFbEnabled;
     BOOL   m_fRawFbWriteCombine;
     BOOL   m_fRawFbGiven;
+
+    // DirectDraw's uncached VirtualCopy view of the framebuffer (vc4hal.cpp)
+    BYTE*  m_pDdFbView;
+    DWORD  m_cbDdFbView;
 
     // HVS overlay plane probe (vc4overlay.cpp)
     BOOL   m_fOverlayProbe;

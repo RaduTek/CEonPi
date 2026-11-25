@@ -453,6 +453,19 @@ ARM1176.
   and takes a reference: `VMAllocCopy` -> `VMSetPages` -> `DupPhysPage`); release with `VirtualFreeEx`
   at the 64 KB block base. RawFrameBuffer's `PAGE_PHYSICAL` mapping is safe only because the
   firmware framebuffer lies outside CE's RAM.
+  **V2a DirectDraw base verified (2026-11-25):** `Vc4GPE` derives from **DDGPE** (`ddgpe.lib` before
+  `gpe.lib`; exports `HALInit`; `ddgpe.lib` supplies `RegisterDDHALAPI`/`GetDDGPE`), primary is a
+  `DDGPESurf`, HAL in `vc4hal.cpp` (modelled on Microsoft's vgaflat). `BSP_VC4DISP` adds `SYSGEN_DDRAW`
+  (`cebasecesysgen.bat`). `ddraw.dll` loads lazily: the HAL line appears when an app first uses
+  DirectDraw, not at GWES start. Video memory is reported as the driver's own uncached
+  `VirtualAlloc`+`VirtualCopy(PAGE_PHYSICAL)` view of the framebuffer (as every shipping CE 7 DDGPE
+  driver does; `HalLock` moves primary pointers from GDI's cached static view into it). The CE 7
+  runtime only queried the Misc/ColorControl/VideoPort callback GUIDs (declined) and never the video
+  memory list. **TCPMP on CE 7:** CE 6+ reuse the desktop `IID_IDirectDraw` (`6C14DB80-...`), so
+  TCPMP took its desktop DirectDraw path and the debug ddraw raised `0x57`; CE 7's `DDCAPS` also has
+  4 extra video-port DWORDs. Fixed in `Y:\TCPMP` (`common\overlay`: always the CE path on CE, CE 6
+  IID fallback, CE 6 `DDCAPS` size with old-size retry). Without an overlay TCPMP deliberately falls
+  back to RawFrameBuffer (`overlay_ddrawce.c`: blit mode + `dwVidMemTotal`==0 + raw available).
 - **Future goal (user, 2026-11-23): VCHIQ.** The real video acceleration path: HVS YUV planes
   (hardware scaling and colour conversion through dispmanx) and hardware decode (MMAL/OpenMAX) are
   only reachable through the firmware's VCHIQ interface, not the mailbox. A DirectDraw overlay would
