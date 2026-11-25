@@ -414,6 +414,24 @@ ARM1176.
   investigated: the System control panel never showed the CPU speed (`OALIoCtlProcessorInfo` fills
   `dwClockSpeed`). Also seen:
   `VirtualProtectEx` `PAGE_WRITECOMBINE` fails, so the RawFrameBuffer mapping stays uncached.
+- **Video overlay (HVS plane), started 2026-11-25, branch `vc4-overlay`.** Plan: hardware-scaled YUV
+  overlay through the firmware's **"Set plane" property tag `0x00048015`** (the Linux fkms driver's
+  interface; no VCHIQ), then a DirectDraw (DDGPE) overlay for TCPMP. Plan file:
+  `~/.claude/plans/playful-twirling-rossum-of-6b25473e-15ff-4757-85fa-3255c3f4c960.md`.
+  Message: 60-byte `set_plane` (display, plane_id, vc_image_type, s8 layer; width, height, pitch,
+  vpitch; src x/y/w/h 16.16; dst x/y/w/h; alpha, num_planes, is_vu, color_encoding; planes[4] bus
+  addresses; transform); disable = same tag with only display + plane_id. Types: YUV420 planar 3,
+  YUYV 45, UYVY 47, NV12 52, RGB565 1. Chroma pitch is implied (luma pitch / 2).
+  **V0 probe verified (2026-11-25, Pi 1 Model B, firmware Nov 2 2026)** (`vc4overlay.cpp`, registry
+  `OverlayProbe`): the tag works **alongside the legacy mailbox framebuffer**, no fkms mode needed.
+  `GET_NUM_DISPLAYS` (0x00040013) = 1, `GET_DISPLAY_ID` (0x00040016, index 0) = **2 (HDMI)**,
+  `FRAMEBUFFER_GET_LAYER` (0x0004000c) = **-127**. A 320x240 YUV420 plane (BT.601, `color_encoding` 1,
+  Y/U/V contiguous, bus `0xC0000000 | pa`, uncached) on **display 2, plane_id 1, layer -126** showed
+  above the desktop, scaled smoothly to 640x480 and 960x540, moved, and disappeared on disable;
+  colours correct (U/V order right); the hardware cursor stays on top; desktop unaffected.
+  **Display 0 shows nothing**: use the id from `GET_DISPLAY_ID`. The tag's req/resp word comes back
+  **0x00000000** (no response bit) even when it works, so `MailboxTags`' per-tag response check must
+  not be applied to Set plane; the value words come back unchanged.
 - **Future goal (user, 2026-11-23): VCHIQ.** The real video acceleration path: HVS YUV planes
   (hardware scaling and colour conversion through dispmanx) and hardware decode (MMAL/OpenMAX) are
   only reachable through the firmware's VCHIQ interface, not the mailbox. A DirectDraw overlay would

@@ -134,6 +134,7 @@ BOOL DisplayInit(LPCTSTR pszInstance, DWORD monitors)
     settings.fDmaCopy = ReadRegDword(hKey, VC4DISP_REG_DMACOPY, 0) != 0;
     settings.fRawFb = ReadRegDword(hKey, VC4DISP_REG_RAWFB, 1) != 0;
     settings.fRawFbWriteCombine = ReadRegDword(hKey, VC4DISP_REG_RAWFBWC, 1) != 0;
+    settings.fOverlayProbe = ReadRegDword(hKey, VC4DISP_REG_OVERLAYPROBE, 0) != 0;
     settings.dwDmaMinPixels = ReadRegDword(hKey, VC4DISP_REG_DMAMINPIXELS, 16384);
     // Burst 8 lost the HDMI signal (bus offset 0x40000000) or hung the
     // system (0xC0000000) on a Pi 1 B; single transfers (0) work
@@ -256,6 +257,8 @@ Vc4GPE::Vc4GPE(const VC4DISP_SETTINGS *pSettings)
     m_fRawFbEnabled = pSettings->fRawFb;
     m_fRawFbWriteCombine = pSettings->fRawFbWriteCombine;
     m_fRawFbGiven = FALSE;
+    m_fOverlayProbe = pSettings->fOverlayProbe;
+    m_fOverlayProbeStarted = FALSE;
 }
 
 //------------------------------------------------------------------------------
@@ -486,6 +489,9 @@ SCODE Vc4GPE::SetMode(int modeNumber, HPALETTE *pPalette)
 
     // DMA blits need the framebuffer address, so they start here
     if (m_fDmaEnabled && !m_fDmaReady) DmaInit();
+
+    // Overlay plane probe (registry OverlayProbe), once
+    OverlayProbeStart();
 
 cleanUp:
     delete [] pBuffer;

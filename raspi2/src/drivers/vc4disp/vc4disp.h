@@ -63,6 +63,10 @@
 #define VC4DISP_REG_RAWFB           L"RawFrameBuffer"
 #define VC4DISP_REG_RAWFBWC         L"RawFbWriteCombine"
 
+// DWORD: 1 = run the HVS overlay plane probe (vc4overlay.cpp) after the
+// first SetMode, 0 (default) do not
+#define VC4DISP_REG_OVERLAYPROBE    L"OverlayProbe"
+
 // Driver settings, read from the registry by DisplayInit
 typedef struct {
     BOOL  fCachedFb;
@@ -73,6 +77,7 @@ typedef struct {
     BOOL  fDmaCopy;
     BOOL  fRawFb;
     BOOL  fRawFbWriteCombine;
+    BOOL  fOverlayProbe;
     DWORD dwDmaMinPixels;
     DWORD dwDmaBurst;
     DWORD dwDmaBusOffset;
@@ -213,6 +218,10 @@ private:
     BOOL   m_fRawFbWriteCombine;
     BOOL   m_fRawFbGiven;
 
+    // HVS overlay plane probe (vc4overlay.cpp)
+    BOOL   m_fOverlayProbe;
+    BOOL   m_fOverlayProbeStarted;
+
     // Helper functions
     UINT8* QueryModeInfo(int modeNumber);
     VOID FlushRect(const RECTL *pRect);
@@ -249,6 +258,11 @@ private:
     VOID CursorOn();
     VOID CursorOff();
     SCODE WrappedEmulatedLine(GPELineParms*);
+
+    // vc4overlay.cpp
+    VOID OverlayProbeStart();
+    VOID OverlayProbe();
+    static DWORD WINAPI OverlayProbeThreadProc(LPVOID pContext);
 };
 
 //------------------------------------------------------------------------------
