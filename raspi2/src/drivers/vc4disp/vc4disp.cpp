@@ -262,6 +262,14 @@ Vc4GPE::Vc4GPE(const VC4DISP_SETTINGS *pSettings)
     memset(&m_rcOvlSrc, 0, sizeof(m_rcOvlSrc));
     memset(&m_rcOvlDst, 0, sizeof(m_rcOvlDst));
     m_dwOvlShown = 0;
+    m_dwOvlUser = OVL_USER_NONE;
+    m_dwOvlBusY = 0;
+    m_dwOvlBusU = 0;
+    m_dwOvlBusV = 0;
+    m_dwPlaneWidth = 0;
+    m_dwPlaneHeight = 0;
+    m_dwPlanePitch = 0;
+    m_pOvlDdSurf = NULL;
     m_fOvlPending = FALSE;
     m_dwOvlSeqQueued = 0;
     m_dwOvlSeqDone = 0;
@@ -586,8 +594,10 @@ SCODE Vc4GPE::AllocSurface(
 //
 //  Method:  AllocSurface (DDGPE)
 //
-//  DirectDraw surfaces (DDGPECreateSurface). No video memory yet (V2a), so
-//  only system-memory surfaces; GDI keeps using the GPESurf version above.
+//  DirectDraw surfaces (DDGPECreateSurface). YV12 can only be an overlay
+//  here, so every YV12 surface is a Vc4OvlSurf (vc4ddovl.cpp), whatever
+//  memory was asked for. Otherwise there is no video memory: only
+//  system-memory surfaces. GDI keeps using the GPESurf version above.
 //
 SCODE Vc4GPE::AllocSurface(
     DDGPESurf **ppSurf, int width, int height, EGPEFormat format,
@@ -596,6 +606,9 @@ SCODE Vc4GPE::AllocSurface(
     DWORD stride;
 
     *ppSurf = NULL;
+    if (pixelFormat == ddgpePixelFormat_YV12) {
+        return Vc4OvlSurf::Create(width, height, pixelFormat, ppSurf);
+    }
     if ((flags & GPE_REQUIRE_VIDEO_MEMORY) != 0) return DDERR_OUTOFVIDEOMEMORY;
 
     stride = ((EGPEFormatToBpp[format] * width + 31) >> 5) << 2;

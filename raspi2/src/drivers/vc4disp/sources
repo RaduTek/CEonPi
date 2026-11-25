@@ -28,7 +28,8 @@ SOURCES=\
     vc4dma.cpp \
     vc4escape.cpp \
     vc4overlay.cpp \
-    vc4hal.cpp
+    vc4hal.cpp \
+    vc4ddovl.cpp
 
 TARGETLIBS= \
     $(_COMMONSDKROOT)\lib\$(_CPUDEPPATH)\ceddk.lib \

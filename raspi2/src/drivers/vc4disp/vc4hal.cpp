@@ -18,8 +18,9 @@
 //  vgaflat sample (public\common\oak\drivers\display\vgaflat\halcaps.cpp).
 //  The driver is a DDGPE (ddgpe.lib supplies HALInit, which calls
 //  buildDDHALInfo below, and the DDGPExxx callbacks). DirectDraw gets the
-//  framebuffer as its primary surface and nothing else yet: no off-screen
-//  video memory, no overlay (V2b).
+//  framebuffer as its primary surface (no off-screen video memory) and, since
+//  V2b, a YV12 overlay on the HVS plane (vc4ddovl.cpp: surfaces and the
+//  Flip / UpdateOverlay / SetOverlayPosition / GetFlipStatus callbacks).
 //
 //  Video memory: the DirectDraw runtime maps the blocks listed by
 //  GUID_GetDriverInfo_VidMemList into the client, and Lock pointers inside a
@@ -74,22 +75,42 @@ static DDHAL_DDCALLBACKS g_ddCallbacks = {
 static DDHAL_DDSURFACECALLBACKS g_ddSurfaceCallbacks = {
     sizeof(DDHAL_DDSURFACECALLBACKS),
     DDHAL_SURFCB32_DESTROYSURFACE |
+    DDHAL_SURFCB32_FLIP |
     DDHAL_SURFCB32_LOCK |
     DDHAL_SURFCB32_UNLOCK |
     DDHAL_SURFCB32_SETCOLORKEY |
     DDHAL_SURFCB32_GETBLTSTATUS |
+    DDHAL_SURFCB32_GETFLIPSTATUS |
+    DDHAL_SURFCB32_UPDATEOVERLAY |
+    DDHAL_SURFCB32_SETOVERLAYPOSITION |
     0,
     DDGPEDestroySurface,        // DestroySurface
-    NULL,                       // Flip
+    HalFlip,                    // Flip (vc4ddovl.cpp)
     HalLock,                    // Lock
     DDGPEUnlock,                // Unlock
     DDGPESetColorKey,           // SetColorKey
     HalGetBltStatus,            // GetBltStatus
-    NULL,                       // GetFlipStatus
-    NULL,                       // UpdateOverlay
-    NULL,                       // SetOverlayPosition
+    HalGetFlipStatus,           // GetFlipStatus (vc4ddovl.cpp)
+    HalUpdateOverlay,           // UpdateOverlay (vc4ddovl.cpp)
+    HalSetOverlayPosition,      // SetOverlayPosition (vc4ddovl.cpp)
     NULL                        // SetPalette
 };
+
+//------------------------------------------------------------------------------
+// Overlay pixel formats (V1: packed YUY2/UYVY planes are never shown by the
+// firmware; DDGPE's DetectPixelFormat knows YV12 but not I420)
+
+static DWORD g_dwFourCC[] = {
+    FOURCC_YV12
+};
+
+// Overlay stretch limits (x1000). The HVS scales freely; these are
+// generous bounds (1/4 to 16x), not measured limits.
+#define VC4HAL_MIN_OVERLAY_STRETCH  250
+#define VC4HAL_MAX_OVERLAY_STRETCH  16000
+
+// Nominal overlay memory reported in DDCAPS (see buildDDHALInfo)
+#define VC4HAL_OVERLAY_BUDGET       (16 * 1024 * 1024)
 
 //------------------------------------------------------------------------------
 //
@@ -272,23 +293,32 @@ EXTERN_C void buildDDHALInfo(LPDDHALINFO lpddhi, DWORD modeidx)
     lpddhi->lpDDCallbacks = &g_ddCallbacks;
     lpddhi->lpDDSurfaceCallbacks = &g_ddSurfaceCallbacks;
     lpddhi->GetDriverInfo = HalGetDriverInfo;
-    lpddhi->lpdwFourCC = NULL;
+    lpddhi->lpdwFourCC = g_dwFourCC;
 
     lpddhi->ddCaps.dwSize = sizeof(DDCAPS);
 
-    // The framebuffer is the only video memory, and the primary fills it
-    lpddhi->ddCaps.dwVidMemTotal = size;
-    lpddhi->ddCaps.dwVidMemFree = 0;
+    // The framebuffer (filled by the primary) plus a nominal budget for
+    // overlay surfaces, which really come from system RAM (AllocPhysMem per
+    // surface); reported so the runtime does not refuse video-memory overlay
+    // requests before they reach AllocSurface
+    lpddhi->ddCaps.dwVidMemTotal = size + VC4HAL_OVERLAY_BUDGET;
+    lpddhi->ddCaps.dwVidMemFree = VC4HAL_OVERLAY_BUDGET;
     lpddhi->ddCaps.dwVidMemStride = 0;
 
+    // Overlay surfaces (flip chains of YV12 Vc4OvlSurf) are allocated per
+    // surface; DirectDraw clients ask for them in video memory
     lpddhi->ddCaps.ddsCaps.dwCaps =
         DDSCAPS_PRIMARYSURFACE |
         DDSCAPS_FRONTBUFFER |
+        DDSCAPS_BACKBUFFER |
+        DDSCAPS_FLIP |
+        DDSCAPS_OVERLAY |
+        DDSCAPS_VIDEOMEMORY |
         DDSCAPS_SYSTEMMEMORY |
         DDSCAPS_OWNDC |
         0;
 
-    lpddhi->ddCaps.dwNumFourCCCodes = 0;
+    lpddhi->ddCaps.dwNumFourCCCodes = sizeof(g_dwFourCC) / sizeof(g_dwFourCC[0]);
     lpddhi->ddCaps.dwPalCaps = 0;
     lpddhi->ddCaps.dwMiscCaps = 0;
 
@@ -297,14 +327,23 @@ EXTERN_C void buildDDHALInfo(LPDDHALINFO lpddhi, DWORD modeidx)
     lpddhi->ddCaps.dwCKeyCaps = 0;
     lpddhi->ddCaps.dwAlphaCaps = 0;
 
-    // Overlay: none yet (V2b)
-    lpddhi->ddCaps.dwOverlayCaps = 0;
-    lpddhi->ddCaps.dwMaxVisibleOverlays = 0;
+    // Overlay (vc4ddovl.cpp): one HVS plane, YV12, flippable, hardware
+    // scaled; no colour key, no alignment rules
+    lpddhi->ddCaps.dwOverlayCaps =
+        DDOVERLAYCAPS_OVERLAYSUPPORT |
+        DDOVERLAYCAPS_FLIP |
+        DDOVERLAYCAPS_FOURCC |
+        0;
+    lpddhi->ddCaps.dwMaxVisibleOverlays = 1;
     lpddhi->ddCaps.dwCurrVisibleOverlays = 0;
-    lpddhi->ddCaps.dwMinOverlayStretch = 0;
-    lpddhi->ddCaps.dwMaxOverlayStretch = 0;
+    lpddhi->ddCaps.dwAlignBoundarySrc = 0;
+    lpddhi->ddCaps.dwAlignSizeSrc = 0;
+    lpddhi->ddCaps.dwAlignBoundaryDest = 0;
+    lpddhi->ddCaps.dwAlignSizeDest = 0;
+    lpddhi->ddCaps.dwMinOverlayStretch = VC4HAL_MIN_OVERLAY_STRETCH;
+    lpddhi->ddCaps.dwMaxOverlayStretch = VC4HAL_MAX_OVERLAY_STRETCH;
 
     RETAILMSG(1, (L"vc4disp: DirectDraw HAL: primary = framebuffer, video "
-        L"memory view 0x%08x (%u bytes), no overlay\r\n", base, size
+        L"memory view 0x%08x (%u bytes), YV12 overlay\r\n", base, size
     ));
 }

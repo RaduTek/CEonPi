@@ -103,9 +103,11 @@ static VOID FillDwords(BYTE *p, DWORD cb, DWORD dwValue)
 
 //------------------------------------------------------------------------------
 //
-//  Function:  IsProcessAlive
+//  Function:  Vc4IsProcessAlive
 //
-static BOOL IsProcessAlive(DWORD dwProcessId)
+//  Also used by vc4ddovl.cpp.
+//
+BOOL Vc4IsProcessAlive(DWORD dwProcessId)
 {
     HANDLE hProc;
     DWORD dwCode = 0;
@@ -205,7 +207,7 @@ ULONG Vc4GPE::OverlayEscape(ULONG cjIn, PVOID pvIn, ULONG cjOut, PVOID pvOut)
             break;
         }
         EnterCriticalSection(&m_csMbox);
-        m_dwOvlShown = pReq->dwBuffer;
+        OverlayEscapeBufferLocked(pReq->dwBuffer);
         dwSeq = OverlayQueueLocked();
         LeaveCriticalSection(&m_csMbox);
         MboxWake();
@@ -255,16 +257,21 @@ cleanUp:
 BOOL Vc4GPE::OverlayCreate(DWORD dwFourCC, DWORD dwWidth, DWORD dwHeight,
     DWORD dwBuffers, BYTE **ppFrames)
 {
-    DWORD dwCaller, pitch, cpitch = 0, offset[3], frame, total, i, dwValue;
+    DWORD dwCaller, pitch, cpitch = 0, offset[3], frame, total, i;
     DWORD pa = 0;
     HANDLE hProc;
     BYTE *pMem, *pVa;
 
     dwCaller = (DWORD)GetCallerVMProcessId();
 
-    // One overlay at a time: replace our own, or a dead process's
+    // One overlay at a time: not while DirectDraw shows one; replace our
+    // own, or a dead process's
+    if (m_dwOvlUser == OVL_USER_DDRAW) {
+        SetLastError(ERROR_BUSY);
+        return FALSE;
+    }
     if (m_fOvlCreated) {
-        if (m_dwOvlOwner != dwCaller && IsProcessAlive(m_dwOvlOwner)) {
+        if (m_dwOvlOwner != dwCaller && Vc4IsProcessAlive(m_dwOvlOwner)) {
             SetLastError(ERROR_BUSY);
             return FALSE;
         }
@@ -300,20 +307,7 @@ BOOL Vc4GPE::OverlayCreate(DWORD dwFourCC, DWORD dwWidth, DWORD dwHeight,
     total = frame * dwBuffers;
 
     // The firmware needs the display id and the framebuffer's layer
-    if (!m_fOvlDisplayKnown) {
-        if (!MailboxGetValue(TAG_GET_DISPLAY_ID, 0, &dwValue)) {
-            RETAILMSG(1, (L"vc4disp: overlay: get display id failed, using 0\r\n"));
-            dwValue = 0;
-        }
-        m_dwOvlDisplay = dwValue;
-        if (!MailboxGetValue(TAG_GET_LAYER, 0, &dwValue)) {
-            RETAILMSG(1, (L"vc4disp: overlay: get fb layer failed, assuming -127\r\n"));
-            dwValue = (DWORD)-127;
-        }
-        m_ovlLayer = (int)dwValue + 1;
-        if (m_ovlLayer > 127) m_ovlLayer = 127;
-        m_fOvlDisplayKnown = TRUE;
-    }
+    OverlayDisplayInit();
 
     if (!MboxInit()) {
         SetLastError(ERROR_GEN_FAILURE);
@@ -372,8 +366,9 @@ BOOL Vc4GPE::OverlayCreate(DWORD dwFourCC, DWORD dwWidth, DWORD dwHeight,
     m_dwOvlOwner = dwCaller;
     m_pOvlOwnerVa = pVa;
     m_fOvlShow = FALSE;
-    m_dwOvlShown = 0;
+    OverlayEscapeBufferLocked(0);
     m_fOvlCreated = TRUE;
+    m_dwOvlUser = OVL_USER_ESCAPE;
     LeaveCriticalSection(&m_csMbox);
 
     for (i = 0; i < dwBuffers; i++) ppFrames[i] = pVa + i * frame;
@@ -412,6 +407,8 @@ VOID Vc4GPE::OverlayDestroy()
 
     EnterCriticalSection(&m_csMbox);
     m_fOvlCreated = FALSE;
+    m_dwOvlUser = OVL_USER_NONE;
+    m_dwOvlBusY = m_dwOvlBusU = m_dwOvlBusV = 0;
     LeaveCriticalSection(&m_csMbox);
 
     // The owner's mapping: only if the owner is the caller (a dead process's
@@ -442,6 +439,58 @@ VOID Vc4GPE::OverlayDestroy()
     m_cbOvlMem = 0;
     m_dwOvlBuffers = 0;
     m_dwOvlOwner = 0;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayDisplayInit
+//
+//  Queries the firmware display id and the framebuffer's layer, once.
+//
+VOID Vc4GPE::OverlayDisplayInit()
+{
+    DWORD dwValue;
+
+    if (m_fOvlDisplayKnown) return;
+
+    if (!MailboxGetValue(TAG_GET_DISPLAY_ID, 0, &dwValue)) {
+        RETAILMSG(1, (L"vc4disp: overlay: get display id failed, using 0\r\n"));
+        dwValue = 0;
+    }
+    m_dwOvlDisplay = dwValue;
+    if (!MailboxGetValue(TAG_GET_LAYER, 0, &dwValue)) {
+        RETAILMSG(1, (L"vc4disp: overlay: get fb layer failed, assuming -127\r\n"));
+        dwValue = (DWORD)-127;
+    }
+    m_ovlLayer = (int)dwValue + 1;
+    if (m_ovlLayer > 127) m_ovlLayer = 127;
+    m_fOvlDisplayKnown = TRUE;
+}
+
+//------------------------------------------------------------------------------
+//
+//  Method:  OverlayEscapeBufferLocked
+//
+//  m_csMbox held: the escape overlay's buffer dwBuffer becomes the plane's
+//  image (Y/U/V bus addresses, size, pitch). YV12 memory order is Y, V, U;
+//  I420 is Y, U, V.
+//
+VOID Vc4GPE::OverlayEscapeBufferLocked(DWORD dwBuffer)
+{
+    DWORD dwFrameBus = m_dwOvlBus + dwBuffer * m_dwOvlFrameBytes;
+
+    m_dwOvlShown = dwBuffer;
+    m_dwOvlBusY = dwFrameBus + m_dwOvlOffset[0];
+    if (m_dwOvlFourCC == VC4OVL_FOURCC_I420) {
+        m_dwOvlBusU = dwFrameBus + m_dwOvlOffset[1];
+        m_dwOvlBusV = dwFrameBus + m_dwOvlOffset[2];
+    } else {
+        m_dwOvlBusV = dwFrameBus + m_dwOvlOffset[1];
+        m_dwOvlBusU = dwFrameBus + m_dwOvlOffset[2];
+    }
+    m_dwPlaneWidth = m_dwOvlWidth;
+    m_dwPlaneHeight = m_dwOvlHeight;
+    m_dwPlanePitch = m_dwOvlPitch;
 }
 
 //------------------------------------------------------------------------------
@@ -490,7 +539,6 @@ BOOL Vc4GPE::OverlayWait(DWORD dwSeq, DWORD dwTimeoutMs)
 DWORD Vc4GPE::OverlayBuildTag(DWORD *pTag)
 {
     DWORD *w = &pTag[3];
-    DWORD dwFrameBus, dwType, nPlanes, planeY, planeU = 0, planeV = 0;
     __int64 sx, sy, sw, sh, dw, dh;
     LONG dl, dt, dr, db, cut;
     LONG scrW = m_nScreenWidth, scrH = m_nScreenHeight;
@@ -501,7 +549,7 @@ DWORD Vc4GPE::OverlayBuildTag(DWORD *pTag)
     memset(w, 0, SET_PLANE_WORDS * sizeof(DWORD));
     w[0] = (m_dwOvlDisplay & 0xFF) | (OVL_PLANE_ID << 8);
 
-    if (!m_fOvlCreated || !m_fOvlShow) return 3 + SET_PLANE_WORDS;
+    if (!m_fOvlShow || m_dwOvlBusY == 0) return 3 + SET_PLANE_WORDS;
 
     // Source in 16.16, destination in screen pixels, then clip the
     // destination to the screen and cut the source by the same fraction
@@ -536,35 +584,20 @@ DWORD Vc4GPE::OverlayBuildTag(DWORD *pTag)
     sh = (sh * (db - dt)) / dh;
     if (sw <= 0 || sh <= 0) return 3 + SET_PLANE_WORDS;
 
-    // Plane addresses of the buffer on screen
-    dwFrameBus = m_dwOvlBus + m_dwOvlShown * m_dwOvlFrameBytes;
-    planeY = dwFrameBus + m_dwOvlOffset[0];
-    if (m_dwOvlFourCC == VC4OVL_FOURCC_I420) {
-        dwType = VC_IMAGE_YUV420;
-        nPlanes = 3;
-        planeU = dwFrameBus + m_dwOvlOffset[1];
-        planeV = dwFrameBus + m_dwOvlOffset[2];
-    } else {
-        // YV12
-        dwType = VC_IMAGE_YUV420;
-        nPlanes = 3;
-        planeV = dwFrameBus + m_dwOvlOffset[1];
-        planeU = dwFrameBus + m_dwOvlOffset[2];
-    }
-
-    w[0] |= (dwType << 16) | (((DWORD)m_ovlLayer & 0xFF) << 24);
-    w[1] = m_dwOvlWidth | (m_dwOvlHeight << 16);
-    w[2] = m_dwOvlPitch;
+    // Planar 4:2:0, the Y/U/V bus addresses of the buffer on screen
+    w[0] |= (VC_IMAGE_YUV420 << 16) | (((DWORD)m_ovlLayer & 0xFF) << 24);
+    w[1] = m_dwPlaneWidth | (m_dwPlaneHeight << 16);
+    w[2] = m_dwPlanePitch;
     w[3] = (DWORD)sx;
     w[4] = (DWORD)sy;
     w[5] = (DWORD)sw;
     w[6] = (DWORD)sh;
     w[7] = ((DWORD)dl & 0xFFFF) | (((DWORD)dt & 0xFFFF) << 16);
     w[8] = ((DWORD)(dr - dl) & 0xFFFF) | (((DWORD)(db - dt) & 0xFFFF) << 16);
-    w[9] = 255 | (nPlanes << 8) | (0 << 16) | (VC_CSC_BT601 << 24);
-    w[10] = planeY;
-    w[11] = planeU;
-    w[12] = planeV;
+    w[9] = 255 | (3 << 8) | (0 << 16) | (VC_CSC_BT601 << 24);
+    w[10] = m_dwOvlBusY;
+    w[11] = m_dwOvlBusU;
+    w[12] = m_dwOvlBusV;
     w[13] = 0;
     w[14] = 0;                          // transform
     return 3 + SET_PLANE_WORDS;

@@ -466,6 +466,18 @@ ARM1176.
   4 extra video-port DWORDs. Fixed in `Y:\TCPMP` (`common\overlay`: always the CE path on CE, CE 6
   IID fallback, CE 6 `DDCAPS` size with old-size retry). Without an overlay TCPMP deliberately falls
   back to RawFrameBuffer (`overlay_ddrawce.c`: blit mode + `dwVidMemTotal`==0 + raw available).
+  **V2b DirectDraw YV12 overlay verified (2026-11-25, Pi 1 Model B, TCPMP):** `vc4ddovl.cpp`. Every
+  YV12 DirectDraw surface is a `Vc4OvlSurf` (own `AllocPhysMem` buffer, Y/V/U, luma pitch multiple of
+  32, mapped into the client with `VirtualAllocCopyEx`, PACSurf pattern; not "video memory").
+  Callbacks UpdateOverlay / SetOverlayPosition / Flip (shows the target, waits for the firmware) /
+  GetFlipStatus on the shared plane engine (plane state = Y/U/V bus addresses + owner escape or
+  DirectDraw). Caps `OVERLAYSUPPORT|FLIP|FOURCC`, FourCC YV12, stretch 250-16000, nominal 16 MB
+  `dwVidMemFree`. Result: 360p MPEG-4 scaled to 1080p plays smoothly, no tearing (2-buffer flip
+  chain), CPU ~75% (60-80%) vs 100% and heavy tearing with RawFrameBuffer; full-screen toggle resizes
+  the overlay; cleared on exit. **Accepted limitation (user, 2026-11-25):** no colour key, so windows
+  over the video area are hidden by the plane (options if revisited: hide/crop the plane when covered,
+  or a 32 bpp desktop with alpha above the video plane). TCPMP Debug-kernel noise:
+  `Virtual free failure!!! addr: 0x00000000` is TCPMP's `FreeBlock` freeing an empty block.
 - **Future goal (user, 2026-11-23): VCHIQ.** The real video acceleration path: HVS YUV planes
   (hardware scaling and colour conversion through dispmanx) and hardware decode (MMAL/OpenMAX) are
   only reachable through the firmware's VCHIQ interface, not the mailbox. A DirectDraw overlay would

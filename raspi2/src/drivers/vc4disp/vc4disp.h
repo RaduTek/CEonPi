@@ -112,6 +112,11 @@ typedef struct {
     DWORD reserved[2];
 } VC4_DMA_CB;
 
+// Who owns the overlay plane (m_dwOvlUser)
+#define OVL_USER_NONE               0
+#define OVL_USER_ESCAPE             1   // VC4OVL_ESCAPE (ovltest)
+#define OVL_USER_DDRAW              2   // DirectDraw overlay surfaces
+
 // CE ARM static mappings: uncached view = cached view + 0x20000000
 #define VC4DISP_STATIC_CACHED       0x80000000
 #define VC4DISP_STATIC_UNCACHED     0xA0000000
@@ -119,6 +124,11 @@ typedef struct {
 #define VC4DISP_STATIC_UNCACHED_OFS 0x20000000
 
 //------------------------------------------------------------------------------
+
+class Vc4OvlSurf;
+
+// vc4overlay.cpp: TRUE while the process exists
+BOOL Vc4IsProcessAlive(DWORD dwProcessId);
 
 // DDGPE (DirectDraw-capable GPE, ddgpe.lib). Without DirectDraw in the OS
 // design it behaves exactly like the GPE driver it was; with it, GWES calls
@@ -146,6 +156,16 @@ public:
     VOID GetVirtualVideoMemory(ULONG *pVirtualBase, ULONG *pSize);
     VOID *DdLockPointer(DDGPESurf *pSurf, VOID *p);
     VOID DirectDrawOpened();
+
+    // vc4ddovl.cpp: DirectDraw overlay on the HVS plane (the escape's engine)
+    HRESULT DdOverlayShow(Vc4OvlSurf *pSurf, const RECT *prcSrc,
+        const RECT *prcDst);
+    HRESULT DdOverlayUpdate(Vc4OvlSurf *pSurf, const RECT *prcSrc,
+        const RECT *prcDst);
+    HRESULT DdOverlayHide();
+    HRESULT DdOverlayFlip(Vc4OvlSurf *pTarget);
+    HRESULT DdOverlayMove(LONG x, LONG y);
+    BOOL DdOverlaySurfaceGone(Vc4OvlSurf *pSurf);
     virtual SCODE Line(GPELineParms*, EGPEPhase);
     virtual SCODE BltPrepare(GPEBltParms*);
     virtual SCODE BltComplete(GPEBltParms*);
@@ -239,10 +259,21 @@ private:
     DWORD  m_cbOvlMem;
     DWORD  m_dwOvlOwner;            // process id of the creator
     BYTE*  m_pOvlOwnerVa;           // mapping in that process
+    DWORD  m_dwOvlUser;             // OVL_USER_xxx: who owns the plane
     BOOL   m_fOvlShow;
     RECT   m_rcOvlSrc;
     RECT   m_rcOvlDst;
-    DWORD  m_dwOvlShown;            // buffer on screen (last queued)
+    DWORD  m_dwOvlShown;            // escape: buffer on screen (last queued)
+
+    // Plane image (OverlayBuildTag): planar 4:2:0, set by the escape's
+    // CREATE/FLIP or by DirectDraw's UpdateOverlay/Flip
+    DWORD  m_dwOvlBusY;
+    DWORD  m_dwOvlBusU;
+    DWORD  m_dwOvlBusV;
+    DWORD  m_dwPlaneWidth;
+    DWORD  m_dwPlaneHeight;
+    DWORD  m_dwPlanePitch;
+    Vc4OvlSurf *m_pOvlDdSurf;   // DirectDraw: surface on screen
     BOOL   m_fOvlPending;           // plane state waits for the thread
     DWORD  m_dwOvlSeqQueued;
     volatile DWORD m_dwOvlSeqDone;
@@ -335,9 +366,41 @@ private:
     BOOL OverlayWait(DWORD dwSeq, DWORD dwTimeoutMs);
     DWORD OverlayBuildTag(DWORD *pTag);
     VOID OverlayFillInfo(VC4OVL_INFO *pInfo);
+    VOID OverlayDisplayInit();
+    VOID OverlayEscapeBufferLocked(DWORD dwBuffer);
     VOID OverlayProbeStart();
     VOID OverlayProbe();
     static DWORD WINAPI OverlayProbeThreadProc(LPVOID pContext);
+};
+
+//------------------------------------------------------------------------------
+//
+//  Vc4OvlSurf (vc4ddovl.cpp): a DirectDraw YV12 overlay surface. Its own
+//  physically contiguous uncached buffer, mapped into the creating process
+//  with VirtualAllocCopyEx (each page referenced, like SMDK6410's PACSurf),
+//  so Buffer() and Lock pointers are that process's addresses. Not in video
+//  memory as far as DirectDraw is concerned.
+//
+class Vc4OvlSurf : public DDGPESurf
+{
+public:
+    static SCODE Create(int width, int height, EDDGPEPixelFormat pixelFormat,
+        DDGPESurf **ppSurf);
+    virtual ~Vc4OvlSurf();
+
+    DWORD m_dwBusY;         // plane bus addresses (uncached alias)
+    DWORD m_dwBusU;
+    DWORD m_dwBusV;
+    DWORD m_dwPitch;        // luma pitch; chroma pitch is half
+
+private:
+    Vc4OvlSurf(int width, int height, BYTE *pBits, int stride,
+        EDDGPEPixelFormat pixelFormat);
+
+    BYTE  *m_pKernel;       // AllocPhysMem view
+    DWORD  m_cbAlloc;
+    DWORD  m_dwOwner;       // process the buffer is mapped into (0 = ours)
+    BYTE  *m_pOwnerVa;
 };
 
 //------------------------------------------------------------------------------
