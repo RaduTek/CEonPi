@@ -47,7 +47,7 @@ These are hardware features that are functional
 |-|-|-|
 | UART | Basic | Used for KITL debugger connection with Visual Studio |
 | [Audio](docs/audio.md) | Complete | Support PWM audio output on the Pi 1 Model B with dithering enhancements for quality |
-| Display | Accelerated (CPU/DMA) | HDMI or composite TV output at the native display resolution (from the firmware, or set in `config.txt`), 16 bpp. Faster software drawing (cached framebuffer, optimized blits), DMA fills, VideoCore hardware cursor, direct framebuffer access for video players (TCPMP). See [catalog items](docs/catalog_items.md) |
+| Display | Accelerated (CPU/DMA/GPU) | HDMI or composite TV output at the native display resolution (from the firmware, or set in `config.txt`), 16 bpp. Faster software drawing (cached framebuffer, optimized blits), DMA fills, VideoCore hardware cursor, direct framebuffer access for video players. DirectDraw with a hardware video overlay[^3]: YV12 video scaled and colour-converted by the VideoCore. See [catalog items](docs/catalog_items.md) |
 | [USB Host](docs/usb.md) | Almost complete | Supports all speeds (low[^1], full, high), USB hubs, input devices and mass storage  |
 | [SD Host](docs/sdhost.md) | Basic | Mounts FAT/exFAT partitions from the SD card, read and write. PIO only[^2] |
 | [USB Ethernet](docs/ethernet.md) | Working | SMSC LAN9512 on the Pi 1 Model B: DHCP, IPv4/IPv6, firmware MAC address. ~5.6 MB/s receive, ~3.8 MB/s send (Release build) |
@@ -60,6 +60,8 @@ This is a hardware limitation of the DWC2 controller, see [docs/usb.md](docs/usb
 
 [^2]: SD transfers use PIO (programmed I/O), not DMA. The BCM2835 Arasan's built-in SDHCI DMA (SDMA/ADMA2) does not work: the controller needs the external BCM DMA engine with EMMC DREQ pacing (as the FreeBSD and Linux drivers use), which the CE standard SD host MDD cannot drive. Driving the external DMA engine is a possible future improvement.
 
+[^3]: The overlay is a VideoCore display plane on top of the desktop, set up through the firmware mailbox (no VCHIQ). With [TCPMP](https://github.com/radutek/TCPMP) (patched for CE 7's DirectDraw) a 360p video scaled to 1080p plays smoothly without tearing at about 75% CPU, against 100% CPU and heavy tearing when drawing to the framebuffer. Decoding is still done by the CPU. There is no colour key, so the overlay covers any window over the video area; the app has to hide it when it isn't visible (patched TCPMP does). Only planar YUV 4:2:0 (YV12) is supported.
+
 ### Future goals
 
 Things I plan on getting working, in order of priority
@@ -67,7 +69,7 @@ Things I plan on getting working, in order of priority
 | Feature | Comments |
 |-|-|
 | GPIO, I2C, SPI, UART | Let CE apps control pins and peripherals (need to see if there's a standard CE API for this) |
-| Video acceleration (VCHIQ) | Hardware video overlay (scaling and colour conversion) and hardware video decoding through the firmware's VCHIQ interface. Would allow a DirectDraw overlay for video players |
+| Hardware video decoding (VCHIQ) | H.264/MPEG-4 decoding on the VideoCore through the firmware's VCHIQ interface (MMAL/OpenMAX), feeding the existing hardware video overlay |
 | SD Host DMA | Current SD driver is PIO only; add external BCM DMA engine support (DREQ-paced) for faster transfers |
 | USB Function | Useful only on the Pi Zero, let the Pi be connected as a USB device to a computer<br>(for ActiveSync or Mass Storage) |
 | USB Isochronous mode | Needed for USB audio and video class devices<br>CE only includes a USB audio driver |
