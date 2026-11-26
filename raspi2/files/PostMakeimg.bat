@@ -17,9 +17,10 @@ goto errorend
 :sizegood
 
 rem
-rem Build the SD card folder %_flatreleasedir%\sdcard with mksdcard.js:
-rem sdcard\kernel.img is nk.nb0 cut at the real image end (trimnb0.ps1, no
-rem padding to ROMSIZE; nk.nb0 stays in place), and with
+rem Build the SD card folder %_flatreleasedir%\sdcard with mksdcard.ps1 (runs
+rem from the platform tree, so an edit needs no Copy Files to Release Directory):
+rem sdcard\kernel.img is nk.nb0 cut at the real image end (no padding to
+rem ROMSIZE; nk.nb0 stays in place), and with
 rem BSP_SDROOT=1 the folders and shortcuts that initobj.dat lists for the root
 rem file system are added. Copy the contents of sdcard to the SD card root.
 rem
@@ -31,7 +32,7 @@ echo deleting old kernel.img from the release dir (now in sdcard\kernel.img)
 del kernel.img
 :nooldkern
 
-cscript //nologo mksdcard.js
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%_TARGETPLATROOT%\files\mksdcard.ps1" < NUL
 if ERRORLEVEL 1 goto mksdfail
 popd
 
@@ -39,7 +40,7 @@ goto endit
 :mksdfail
 popd
 echo.
-echo Error! mksdcard.js failed to build the sdcard folder
+echo Error! mksdcard.ps1 failed to build the sdcard folder
 echo.
 goto errorend
 :NoFlash

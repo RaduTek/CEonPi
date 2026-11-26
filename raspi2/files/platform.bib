@@ -193,9 +193,9 @@ ENDIF BSP_NOAUDIO !
 
 ; Modules loaded from the SD card instead of the image (catalog item "Load
 ; optional modules from the SD card", BSP_SDOFFLOAD=1, which needs
-; BSP_SDROOT=1). With it set, PostFmergeBib.bat (sdoffload.js) removes each
+; BSP_SDROOT=1). With it set, PostFmergeBib.bat (sdoffload.ps1) removes each
 ; MODULES entry named on a "; SDOFFLOAD <name>" line below from ce.bib before
-; romimage, and mksdcard.js copies the module into the sdcard\Windows build
+; romimage, and mksdcard.ps1 copies the module into the sdcard\Windows build
 ; folder; with the card as root it then appears in \Windows. These lines are
 ; comments, so without the item they change nothing. Editing them changes
 ; this file, so makeimg rebuilds ce.bib and the list takes effect.

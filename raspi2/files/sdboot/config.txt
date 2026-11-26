@@ -1,5 +1,5 @@
 # Raspberry Pi firmware settings for the CEonPi Windows CE 7 BSP.
-# Copied to the SD card root by mksdcard.js (release dir\sdcard\config.txt).
+# Copied to the SD card root by mksdcard.ps1 (release dir\sdcard\config.txt).
 
 # Drive HDMI even if no display is detected at power on.
 hdmi_force_hotplug=1

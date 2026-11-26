@@ -38,15 +38,18 @@ controller so keyboards, mice and USB Ethernet work.
 - `raspi2.bat`: environment for the BSP. Sets `IMGFLASH=1` (kernel loaded from the SD card
   without a bootloader) and `BSP_NOTOUCH=1`.
 - `files/`: `config.bib` (memory map), `platform.bib`, `platform.reg`, `PostMakeimg.bat`
-  (runs `mksdcard.js`: builds `<release dir>\sdcard`, a complete card: everything in
-  `files/sdboot` (Pi firmware, `LICENCE.broadcom`, our `config.txt`), `kernel.img` (a copy of
-  `nk.nb0`) and the `initobj.dat` folders/shortcuts when `BSP_SDROOT=1`; copy its contents to a
+  (runs `mksdcard.ps1`: builds `<release dir>\sdcard`, a complete card: everything in
+  `files/sdboot` (Pi firmware, `LICENCE.broadcom`, our `config.txt`), `kernel.img` (`nk.nb0`
+  trimmed) and the `initobj.dat` folders/shortcuts when `BSP_SDROOT=1`; copy its contents to a
   blank FAT32 card). The firmware must stay in the `sdboot` subfolder: makeimg merges every
   top-level `*.dat` in the release dir, and `fixup.dat` is binary (`.gitattributes` marks
   `files/sdboot` firmware as binary; the `*.dat` CRLF rule would corrupt it).
-  `PostFmergeBib.bat` (runs `sdoffload.js`): with `BSP_SDOFFLOAD=1` drops the modules listed as
-  `; SDOFFLOAD` in `platform.bib` from `ce.bib` before romimage; `mksdcard.js` puts them in
-  `sdcard\Windows`. With the Microsoft "ROM-only File System" item (no `fsysram`) and
+  `PostFmergeBib.bat` (runs `sdoffload.ps1`): with `BSP_SDOFFLOAD=1` drops the modules listed as
+  `; SDOFFLOAD` in `platform.bib` from `ce.bib` before romimage; `mksdcard.ps1` puts them in
+  `sdcard\Windows`. Helper scripts are Windows PowerShell 2.0 (the VM's version), run from
+  `%_TARGETPLATROOT%\files` (not release-dir copies) with `-ExecutionPolicy Bypass`; write text
+  files with `[IO.File]::WriteAllLines(..., [Text.Encoding]::Default)`, never `Out-File`/`>`
+  (UTF-16 in PS 2.0). With the Microsoft "ROM-only File System" item (no `fsysram`) and
   `BSP_SDROOT=1`, the card is also the bootable volume: registry hives persist in the card's
   `\Windows\Registry` (OAL answers `IOCTL_HAL_GET_HIVE_CLEAN_FLAG` "keep"), and `config.bib`
   shrinks `FSRAMPERCENT` (both through `@CESYSGEN` conditions on `FILESYS_FSYSRAM`). See
@@ -89,9 +92,9 @@ controller so keyboards, mice and USB Ethernet work.
 - KITL is on by default (`IMGNOKITL=1` disables it). The boot waits for Platform Builder.
 - The image links at `0x80008000` when `IMGFLASH=1`. The whole `kernel.img` is resident RAM
   (about 25 MB for a Checked image). `NKLEN` is only a ceiling (`AUTOSIZE=ON` returns the unused
-  part to RAM): 64 MB Release (`IF WINCESHIP`), 80 MB Debug/Checked (2026-11-26, untested).
-  romimage pads `nk.nb0` to `ROMSIZE`; `mksdcard.js` runs `files\trimnb0.ps1`, which writes
-  `kernel.img` only up to `ROMHDR.physlast` (CE-on-iPod method; `BSP_NOTRIM=1` copies it whole).
+  part to RAM): 64 MB Release (`IF WINCESHIP`), 80 MB Debug/Checked (2026-11-26, verified).
+  romimage pads `nk.nb0` to `ROMSIZE`; `mksdcard.ps1` writes `kernel.img` only up to
+  `ROMHDR.physlast` (CE-on-iPod method; `BSP_NOTRIM=1` copies it whole).
 - Main memory size (2026-11-22, verified): `OEMInit` (`init.c` `GetMainMemoryEnd`) sets
   `dwMainMemoryEndAddress` from the firmware "get ARM memory" property tag (`0x00010005`, via
   `OALMailboxPropertyTag` in `ioctl.c`), falling back to 128 MB if the query fails. The value must be

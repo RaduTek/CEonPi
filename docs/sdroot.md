@@ -30,7 +30,7 @@ and load from there.
 
 `kernel.img` is resident RAM, so every module in it costs RAM permanently. A module in the card's
 `Windows` folder is demand-paged from the card only when used. Needs `BSP_SDROOT=1` (otherwise
-nothing finds the files; `sdoffload.js` refuses the combination).
+nothing finds the files; `sdoffload.ps1` refuses the combination).
 
 - **The list** is the `; SDOFFLOAD <name>` comment lines at the end of the MODULES section in
   `raspi2\files\platform.bib`. Editing it changes a `.bib` input, so makeimg rebuilds `ce.bib`.
@@ -51,14 +51,14 @@ nothing finds the files; `sdoffload.js` refuses the combination).
 - **Rules for adding a module:** it must not be needed before the card mounts (early in boot phase
   2) and no boot-phase-1 driver may import it. Check a boot log: if the module loads during boot,
   keep it in the image. Absolute `\Windows\` references are fine with the card as root.
-- **Build steps:** makeimg runs `PostFmergeBib.bat` -> `sdoffload.js` right after fmerge writes
+- **Build steps:** makeimg runs `PostFmergeBib.bat` -> `sdoffload.ps1` right after fmerge writes
   `ce.bib`, before romimage (`makeimg.proj`, `CreateConfigBibFile`). It drops the listed entries
   from the MODULES section of `ce.bib` and writes `sdoffload.txt` (`ON`/`OFF`, then the removed
-  modules). `PostMakeimg.bat` -> `mksdcard.js` copies those modules into `sdcard\Windows`.
-  `sdoffload.js` is idempotent: if it runs again on an already filtered `ce.bib`, modules from
+  modules). `PostMakeimg.bat` -> `mksdcard.ps1` copies those modules into `sdcard\Windows`.
+  `sdoffload.ps1` is idempotent: if it runs again on an already filtered `ce.bib`, modules from
   the previous list stay on it.
 - **Toggle trap:** makeimg only rebuilds `ce.bib` when a `.bib` file changes, not when a catalog
-  variable changes. `mksdcard.js` compares `sdoffload.txt` with `BSP_SDOFFLOAD` and stops with
+  variable changes. `mksdcard.ps1` compares `sdoffload.txt` with `BSP_SDOFFLOAD` and stops with
   "changed since ce.bib was built" on a mismatch: delete `ce.bib` in the release dir and make the
   image again.
 - **Keep the card in step with the image:** copy the whole `sdcard` folder after every build. A
@@ -95,7 +95,7 @@ drops the RAM file system (`fsysram`), which reserves about 15% of RAM (`FSRAMPE
   with a "clean memory configuration" every time; that is about RAM and must not wipe the card.
 - **Registry changes in a new image:** existing hives on the card win over the registry in a new
   `kernel.img`. After a `platform.reg` (or catalog) change, delete `\Windows\Registry` on the card
-  so the new defaults apply; `mksdcard.js` reminds you. Deleting it is also the way to reset the
+  so the new defaults apply; `mksdcard.ps1` reminds you. Deleting it is also the way to reset the
   registry.
 - `kernel.img` does not shrink (the RAM FS is not in the image); the gain is RAM and a boot that is
   guaranteed to wait for the card.
@@ -103,7 +103,7 @@ drops the RAM file system (`fsysram`), which reserves about 15% of RAM (`FSRAMPE
 - Build: tick ROM-only File System, **Sysgen** (the `@CESYSGEN` conditions in `platform.reg` and
   `config.bib` are filtered by the BSP build), then Make Run-Time Image. The OAL changed, so check
   `nk.map` for `OALIoCtlHalGetHiveCleanFlag`.
-- Still unverified: where `initobj.dat` goes without a RAM FS (`mksdcard.js` already puts its
+- Still unverified: where `initobj.dat` goes without a RAM FS (`mksdcard.ps1` already puts its
   items on the card).
 
 ## How it works (`raspi2\files\platform.reg`, `IF BSP_SDROOT`)
@@ -142,7 +142,7 @@ The card must be mounted before the shell starts, so the SD drivers load in **bo
 `\Object Store`, not on the card: the desktop shortcuts are missing and the `\Windows` subfolders
 are new and empty.
 
-Fix: makeimg builds them. `PostMakeimg.bat` runs `mksdcard.js` (cscript), which recreates
+Fix: makeimg builds them. `PostMakeimg.bat` runs `mksdcard.ps1` (PowerShell), which recreates
 `<release dir>\sdcard` on every image build:
 - `sdcard\kernel.img` - a copy of `nk.nb0` (`nk.nb0` stays in place).
 - with `BSP_SDROOT=1`: every folder and file that `initobj.dat` lists, files copied from the

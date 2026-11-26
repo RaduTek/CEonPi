@@ -47,7 +47,7 @@ IF IMGFLASH !
 ELSE
 #define     NKSTART      80008000
 ; NKLEN is only a ceiling: AUTOSIZE returns the unused part to RAM, and
-; kernel.img is cut at the real image end (trimnb0.ps1), so a large value
+; kernel.img is cut at the real image end (mksdcard.ps1), so a large value
 ; costs neither RAM nor card space. Release (WINCESHIP=1): 64 MB. Debug and
 ; Checked (no WINCESHIP) are larger: 80 MB.
 IF WINCESHIP
