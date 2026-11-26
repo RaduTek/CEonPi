@@ -4,13 +4,15 @@
   before romimage (public\common\oak\misc\makeimg.proj, target PreRomImage,
   only when romimage is about to run).
 
-  Deletes the previous nk.nb0/nk.nb1. PostMakeimg.bat treats an nk.nb1 as
+  Deletes the previous nk.nb0-nk.nb3 (romimage writes nk.nb1 and further parts
+  only when the image is larger than ROMSIZE and never deletes old ones; same
+  list as the CE-on-iPod PreFmergeBib.bat). PostMakeimg.bat treats an nk.nb1 as
   "image too big for NKLEN"; without this, an nk.nb1 left over from an earlier
   oversized build would fail every later build, even one that fits.
 -->
 <Project DefaultTargets="DeleteOldNbFiles" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Target Name="DeleteOldNbFiles">
-    <Message Text="PreRomImage: deleting old nk.nb0/nk.nb1" />
-    <Delete Files="$(_FLATRELEASEDIR)\nk.nb0;$(_FLATRELEASEDIR)\nk.nb1" />
+    <Message Text="PreRomImage: deleting old nk.nb0-nk.nb3" />
+    <Delete Files="$(_FLATRELEASEDIR)\nk.nb0;$(_FLATRELEASEDIR)\nk.nb1;$(_FLATRELEASEDIR)\nk.nb2;$(_FLATRELEASEDIR)\nk.nb3" />
   </Target>
 </Project>

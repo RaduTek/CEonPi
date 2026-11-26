@@ -89,7 +89,9 @@ controller so keyboards, mice and USB Ethernet work.
 - KITL is on by default (`IMGNOKITL=1` disables it). The boot waits for Platform Builder.
 - The image links at `0x80008000` when `IMGFLASH=1`. The whole `kernel.img` is resident RAM
   (about 25 MB for a Checked image). `NKLEN` is only a ceiling (`AUTOSIZE=ON` returns the unused
-  part to RAM).
+  part to RAM): 64 MB Release (`IF WINCESHIP`), 80 MB Debug/Checked (2026-11-26, untested).
+  romimage pads `nk.nb0` to `ROMSIZE`; `mksdcard.js` runs `files\trimnb0.ps1`, which writes
+  `kernel.img` only up to `ROMHDR.physlast` (CE-on-iPod method; `BSP_NOTRIM=1` copies it whole).
 - Main memory size (2026-11-22, verified): `OEMInit` (`init.c` `GetMainMemoryEnd`) sets
   `dwMainMemoryEndAddress` from the firmware "get ARM memory" property tag (`0x00010005`, via
   `OALMailboxPropertyTag` in `ioctl.c`), falling back to 128 MB if the query fails. The value must be

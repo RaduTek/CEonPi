@@ -7,7 +7,9 @@
 //     Copy Files to Release Directory): the Raspberry Pi firmware
 //     (bootcode.bin, start.elf, fixup.dat, the cut-down start_cd.elf /
 //     fixup_cd.dat), LICENCE.broadcom and our config.txt.
-//   - sdcard\kernel.img : a copy of nk.nb0 (nk.nb0 itself stays in place).
+//   - sdcard\kernel.img : nk.nb0 cut at the real image end (ROMHDR physlast,
+//     trimnb0.ps1), without romimage's padding to ROMSIZE. nk.nb0 itself
+//     stays in place.
 //   - with BSP_SDROOT=1 : the folders and files that initobj.dat lists for
 //     the root file system (desktop shortcuts, \Windows\Desktop,
 //     \Windows\Programs, \Program Files, \My Documents, \Windows\Keys, ...).
@@ -89,11 +91,26 @@ for (var e = new Enumerator(fso.GetFolder(boot).Files); !e.atEnd(); e.moveNext()
 }
 log(nBoot + " boot files copied from sdboot");
 
-// kernel.img
+// kernel.img: nk.nb0 without romimage's padding to ROMSIZE (trimnb0.ps1 cuts
+// it at ROMHDR.physlast). Set BSP_NOTRIM=1 to copy the whole nk.nb0.
 var nb0 = fso.BuildPath(frd, "nk.nb0");
 if (!fso.FileExists(nb0)) fail("nk.nb0 not found in " + frd);
-fso.CopyFile(nb0, fso.BuildPath(sd, "kernel.img"), true);
-log("kernel.img copied from nk.nb0");
+var kimg = fso.BuildPath(sd, "kernel.img");
+var platRoot = env("_TARGETPLATROOT");
+var trimScript = platRoot ? fso.BuildPath(fso.BuildPath(platRoot, "files"), "trimnb0.ps1") : "";
+if (!trimScript || !fso.FileExists(trimScript)) fail("trimnb0.ps1 not found (_TARGETPLATROOT\\files)");
+var trimCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"" + trimScript +
+              "\" -InFile \"" + nb0 + "\" -OutFile \"" + kimg + "\"";
+if (env("BSP_NOTRIM") == "1") trimCmd += " -NoTrim";
+var px = new ActiveXObject("WScript.Shell").Exec(trimCmd);
+px.StdIn.Close();
+var pxOut = px.StdOut.ReadAll();
+var pxErr = px.StdErr.ReadAll();
+while (px.Status == 0) WScript.Sleep(50);
+if (pxOut) WScript.Echo(pxOut.replace(/\s+$/, ""));
+if (pxErr) WScript.Echo(pxErr.replace(/\s+$/, ""));
+if (px.ExitCode != 0 || !fso.FileExists(kimg)) fail("trimnb0.ps1 failed (exit code " + px.ExitCode + ")");
+log("kernel.img written from nk.nb0 (" + fso.GetFile(kimg).Size + " of " + fso.GetFile(nb0).Size + " bytes)");
 
 // initobj.dat items, only when the SD card is the root file system.
 if (env("BSP_SDROOT") == "1") {

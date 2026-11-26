@@ -40,11 +40,13 @@ nothing finds the files; `sdoffload.js` refuses the combination).
   `tracert`, `ndisconfig`, `ipv6`). Then the IE7 browser (`mshtml` 8.6 MB, `mshtmled`, `msls31`,
   `imgutil`, `pngfilt`, `iesample`, `inetcpl`, about 11 MB): adding the Internet Explorer 7
   catalog item grew the image contents to 32.3 MB even after the first list, past `NKLEN`
-  (32 MB for Checked/Release), so romimage split it into `nk.nb0` + `nk.nb1` (unbootable). A PE
+  (then 32 MB for Checked/Release; since 2026-11-26 it is 64 MB Release / 80 MB Debug and Checked,
+  and `kernel.img` is trimmed to the real image end), so romimage split it into `nk.nb0` +
+  `nk.nb1` (unbootable). A PE
   import scan of all 164 remaining image modules found no importer of the browser modules outside
   the browser group itself. Entries for components not in the image are skipped with a warning.
 - **Stale `nk.nb1`:** `PostMakeimg.bat` reports "too big" when `nk.nb1` exists. `PreRomImage.proj`
-  (makeimg runs it right before romimage) deletes the old `nk.nb0`/`nk.nb1`, so a leftover from an
+  (makeimg runs it right before romimage) deletes the old `nk.nb0`-`nk.nb3`, so a leftover from an
   oversized build cannot fail a later build that fits.
 - **Rules for adding a module:** it must not be needed before the card mounts (early in boot phase
   2) and no boot-phase-1 driver may import it. Check a boot log: if the module loads during boot,

@@ -46,14 +46,19 @@ IF IMGFLASH !
 #define     RAMLEN       05FC0000    ; up to 0x88000000, extended by OEMInit
 ELSE
 #define     NKSTART      80008000
-; Debug builds are larger so we need a bigger binary image
-#if "$(WINCEDEBUG)"=="debug"
-#define     NKLEN        02800000    ; 48MB (Max size. This will be auto-sized)
-#else
-#define     NKLEN        02000000    ; 32MB (Max size. This will be auto-sized)
-#endif
-#define     RAMSTART     82008000
-#define     RAMLEN       05FF8000    ; up to 0x88000000, extended by OEMInit
+; NKLEN is only a ceiling: AUTOSIZE returns the unused part to RAM, and
+; kernel.img is cut at the real image end (trimnb0.ps1), so a large value
+; costs neither RAM nor card space. Release (WINCESHIP=1): 64 MB. Debug and
+; Checked (no WINCESHIP) are larger: 80 MB.
+IF WINCESHIP
+#define     NKLEN        04000000    ; 64MB (Max size. This will be auto-sized)
+#define     RAMSTART     84008000
+#define     RAMLEN       03FF8000    ; up to 0x88000000, extended by OEMInit
+ELSE
+#define     NKLEN        05000000    ; 80MB (Max size. This will be auto-sized)
+#define     RAMSTART     85008000
+#define     RAMLEN       02FF8000    ; up to 0x88000000, extended by OEMInit
+ENDIF
 ENDIF
 
 ;-----------------------------------------------------

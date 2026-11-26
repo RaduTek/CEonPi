@@ -18,7 +18,8 @@ goto errorend
 
 rem
 rem Build the SD card folder %_flatreleasedir%\sdcard with mksdcard.js:
-rem sdcard\kernel.img is a copy of nk.nb0 (nk.nb0 stays in place), and with
+rem sdcard\kernel.img is nk.nb0 cut at the real image end (trimnb0.ps1, no
+rem padding to ROMSIZE; nk.nb0 stays in place), and with
 rem BSP_SDROOT=1 the folders and shortcuts that initobj.dat lists for the root
 rem file system are added. Copy the contents of sdcard to the SD card root.
 rem
